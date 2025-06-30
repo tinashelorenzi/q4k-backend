@@ -25,6 +25,8 @@ urlpatterns = [
     
     # API endpoints
     path('api/auth/', include('users.urls')),
+    path('api/tutors/', include('tutors.urls')),
+    path('api/gigs/', include('gigs.urls')),
     
     # Health check endpoint (optional)
     path('api/health/', lambda request: 

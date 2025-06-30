@@ -47,7 +47,9 @@ class Gig(models.Model):
         'tutors.Tutor',
         on_delete=models.CASCADE,
         related_name='gigs',
-        help_text="Assigned tutor for this gig"
+        help_text="Assigned tutor for this gig",
+        null=True,
+        blank=True
     )
     
     title = models.CharField(
@@ -183,7 +185,7 @@ class Gig(models.Model):
         ]
     
     def __str__(self):
-        return f"{self.gig_id} - {self.title} ({self.tutor.full_name})"
+        return f"{self.gig_id} - {self.title} ({self.tutor.full_name if self.tutor else 'Unassigned'})"
     
     @property
     def gig_id(self):
@@ -286,7 +288,7 @@ class Gig(models.Model):
     
     def complete_gig(self):
         """Mark gig as completed."""
-        if self.status == 'active':
+        if self.status in ['active', 'on_hold']:
             self.status = 'completed'
             self.actual_end_date = timezone.now().date()
             self.total_hours_remaining = Decimal('0.00')
@@ -296,7 +298,8 @@ class Gig(models.Model):
         """Cancel the gig."""
         self.status = 'cancelled'
         if reason:
-            self.notes += f"\nCancellation reason: {reason}"
+            timestamp = timezone.now().strftime("%Y-%m-%d %H:%M")
+            self.notes += f"\n[{timestamp}] Cancellation reason: {reason}"
         self.save()
     
     def put_on_hold(self, reason=""):
@@ -304,13 +307,16 @@ class Gig(models.Model):
         if self.status == 'active':
             self.status = 'on_hold'
             if reason:
-                self.notes += f"\nPut on hold: {reason}"
+                timestamp = timezone.now().strftime("%Y-%m-%d %H:%M")
+                self.notes += f"\n[{timestamp}] Put on hold: {reason}"
             self.save()
     
     def resume_gig(self):
         """Resume gig from hold."""
         if self.status == 'on_hold':
             self.status = 'active'
+            timestamp = timezone.now().strftime("%Y-%m-%d %H:%M")
+            self.notes += f"\n[{timestamp}] Resumed from hold"
             self.save()
     
     def log_hours(self, hours_worked, notes=""):
@@ -374,6 +380,27 @@ class GigSession(models.Model):
         help_text="Whether the student attended the session"
     )
     
+    # Add verification tracking
+    is_verified = models.BooleanField(
+        default=False,
+        help_text="Whether this session has been verified by an administrator"
+    )
+    
+    verified_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='verified_sessions',
+        help_text="Administrator who verified this session"
+    )
+    
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this session was verified"
+    )
+    
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -382,9 +409,18 @@ class GigSession(models.Model):
         ordering = ['-session_date', '-start_time']
         verbose_name = 'Gig Session'
         verbose_name_plural = 'Gig Sessions'
+        indexes = [
+            models.Index(fields=['gig', 'session_date']),
+            models.Index(fields=['is_verified']),
+        ]
     
     def __str__(self):
         return f"{self.gig.gig_id} - {self.session_date} ({self.hours_logged}h)"
+    
+    @property
+    def session_id(self):
+        """Get formatted session ID."""
+        return f"SES-{self.pk:04d}" if self.pk else "SES-XXXX"
     
     def clean(self):
         """Custom validation."""
@@ -394,24 +430,55 @@ class GigSession(models.Model):
             raise ValidationError("Start time must be before end time.")
     
     def save(self, *args, **kwargs):
-        """Override save to update gig hours."""
+        """Override save to update gig hours only for verified sessions."""
         is_new = self.pk is None
         old_hours = None
+        old_verified = False
         
         if not is_new:
             old_session = GigSession.objects.get(pk=self.pk)
             old_hours = old_session.hours_logged
+            old_verified = old_session.is_verified
         
         self.clean()
         super().save(*args, **kwargs)
         
-        # Update gig hours
-        if is_new:
-            # New session - subtract hours from remaining
-            self.gig.total_hours_remaining -= self.hours_logged
+        # Only update gig hours for verified sessions
+        if self.is_verified:
+            if is_new and not old_verified:
+                # New verified session - subtract hours from remaining
+                self.gig.total_hours_remaining -= self.hours_logged
+                self.gig.save()
+            elif not is_new and old_verified and old_hours != self.hours_logged:
+                # Updated verified session - adjust the difference
+                hours_diff = self.hours_logged - old_hours
+                self.gig.total_hours_remaining -= hours_diff
+                self.gig.save()
+            elif not is_new and not old_verified:
+                # Session was just verified - subtract hours
+                self.gig.total_hours_remaining -= self.hours_logged
+                self.gig.save()
+        elif not self.is_verified and old_verified:
+            # Session was unverified - add hours back
+            self.gig.total_hours_remaining += self.hours_logged
             self.gig.save()
-        elif old_hours != self.hours_logged:
-            # Updated session - adjust the difference
-            hours_diff = self.hours_logged - old_hours
-            self.gig.total_hours_remaining -= hours_diff
-            self.gig.save()
+    
+    def verify(self, verified_by_user):
+        """Verify the session."""
+        if not self.is_verified:
+            self.is_verified = True
+            self.verified_by = verified_by_user
+            self.verified_at = timezone.now()
+            self.save()
+            return True
+        return False
+    
+    def unverify(self):
+        """Unverify the session."""
+        if self.is_verified:
+            self.is_verified = False
+            self.verified_by = None
+            self.verified_at = None
+            self.save()
+            return True
+        return False

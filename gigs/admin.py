@@ -19,13 +19,14 @@ class GigSessionInline(admin.TabularInline):
         'end_time',
         'hours_logged',
         'student_attendance',
+        'is_verified',
         'session_notes',
     )
-    readonly_fields = ()
+    readonly_fields = ('is_verified',)
     
     def get_queryset(self, request):
         """Optimize queryset."""
-        return super().get_queryset(request).select_related('gig')
+        return super().get_queryset(request).select_related('gig', 'verified_by')
 
 
 @admin.register(GigSession)
@@ -41,15 +42,19 @@ class GigSessionAdmin(admin.ModelAdmin):
         'time_display',
         'hours_logged',
         'student_attendance_display',
+        'verification_status_display',
+        'verified_by_display',
         'created_at_display',
     )
     
     list_filter = (
         'session_date',
         'student_attendance',
+        'is_verified',
         'gig__status',
         'gig__subject_name',
         'created_at',
+        'verified_at',
     )
     
     search_fields = (
@@ -58,11 +63,17 @@ class GigSessionAdmin(admin.ModelAdmin):
         'gig__tutor__last_name',
         'gig__client_name',
         'session_notes',
+        'verified_by__username',
+        'verified_by__first_name',
+        'verified_by__last_name',
     )
     
     readonly_fields = (
         'created_at',
         'updated_at',
+        'verified_by',
+        'verified_at',
+        'is_verified',
     )
     
     ordering = ('-session_date', '-start_time')
@@ -84,6 +95,14 @@ class GigSessionAdmin(admin.ModelAdmin):
                 'session_notes',
             )
         }),
+        ('Verification', {
+            'fields': (
+                'is_verified',
+                'verified_by',
+                'verified_at',
+            ),
+            'classes': ('collapse',)
+        }),
         ('Timestamps', {
             'fields': (
                 'created_at',
@@ -92,6 +111,11 @@ class GigSessionAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+    
+    actions = [
+        'verify_selected_sessions',
+        'unverify_selected_sessions',
+    ]
     
     def session_id_display(self, obj):
         """Display session ID."""
@@ -119,11 +143,56 @@ class GigSessionAdmin(admin.ModelAdmin):
             return format_html('<span style="color: red;">✗ Absent</span>')
     student_attendance_display.short_description = 'Attendance'
     
+    def verification_status_display(self, obj):
+        """Display verification status with icons."""
+        if obj.is_verified:
+            return format_html('<span style="color: green;">✓ Verified</span>')
+        else:
+            return format_html('<span style="color: orange;">⏳ Pending</span>')
+    verification_status_display.short_description = 'Verification'
+    verification_status_display.admin_order_field = 'is_verified'
+    
+    def verified_by_display(self, obj):
+        """Display who verified the session."""
+        if obj.verified_by:
+            url = reverse('admin:users_user_change', args=[obj.verified_by.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.verified_by.get_full_name() or obj.verified_by.username)
+        return "—"
+    verified_by_display.short_description = 'Verified By'
+    verified_by_display.admin_order_field = 'verified_by'
+    
     def created_at_display(self, obj):
         """Display creation date."""
         return obj.created_at.strftime("%Y-%m-%d %H:%M")
     created_at_display.short_description = 'Created'
     created_at_display.admin_order_field = 'created_at'
+    
+    # Custom Actions
+    def verify_selected_sessions(self, request, queryset):
+        """Verify selected sessions."""
+        updated = 0
+        for session in queryset.filter(is_verified=False):
+            if session.verify(request.user):
+                updated += 1
+        
+        self.message_user(
+            request,
+            f'{updated} session(s) were verified successfully.'
+        )
+    verify_selected_sessions.short_description = "Verify selected sessions"
+    
+    def unverify_selected_sessions(self, request, queryset):
+        """Unverify selected sessions."""
+        updated = 0
+        for session in queryset.filter(is_verified=True):
+            if session.unverify():
+                updated += 1
+        
+        self.message_user(
+            request,
+            f'{updated} session(s) were unverified successfully.'
+        )
+    unverify_selected_sessions.short_description = "Unverify selected sessions"
 
 
 @admin.register(Gig)
@@ -143,6 +212,7 @@ class GigAdmin(admin.ModelAdmin):
         'status_display',
         'progress_display',
         'financial_summary',
+        'verification_summary',
         'dates_display',
     )
     
@@ -176,6 +246,7 @@ class GigAdmin(admin.ModelAdmin):
         'profit_analysis_display',
         'overdue_status_display',
         'session_count_display',
+        'verification_summary_display',
     )
     
     ordering = ('-created_at',)
@@ -225,6 +296,7 @@ class GigAdmin(admin.ModelAdmin):
             'fields': (
                 'status',
                 'session_count_display',
+                'verification_summary_display',
                 'notes',
             )
         }),
@@ -244,6 +316,7 @@ class GigAdmin(admin.ModelAdmin):
         'resume_from_hold',
         'cancel_selected_gigs',
         'mark_as_high_priority',
+        'verify_all_sessions',
     ]
     
     def get_queryset(self, request):
@@ -251,7 +324,8 @@ class GigAdmin(admin.ModelAdmin):
         queryset = super().get_queryset(request)
         return queryset.select_related('tutor').annotate(
             session_count=Count('sessions'),
-            total_hours_logged=Sum('sessions__hours_logged')
+            total_hours_logged=Sum('sessions__hours_logged'),
+            verified_sessions_count=Count('sessions', filter=models.Q(sessions__is_verified=True)),
         )
     
     def gig_id_display(self, obj):
@@ -269,8 +343,10 @@ class GigAdmin(admin.ModelAdmin):
     
     def tutor_link(self, obj):
         """Display tutor with link to tutor admin."""
-        url = reverse('admin:tutors_tutor_change', args=[obj.tutor.pk])
-        return format_html('<a href="{}">{}</a>', url, obj.tutor.full_name)
+        if obj.tutor:
+            url = reverse('admin:tutors_tutor_change', args=[obj.tutor.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.tutor.full_name)
+        return format_html('<span style="color: red;">Unassigned</span>')
     tutor_link.short_description = 'Tutor'
     tutor_link.admin_order_field = 'tutor__last_name'
     
@@ -330,6 +406,36 @@ class GigAdmin(admin.ModelAdmin):
             obj.profit_margin
         )
     financial_summary.short_description = 'Financials'
+    
+    def verification_summary(self, obj):
+        """Display verification summary."""
+        total_sessions = getattr(obj, 'session_count', obj.sessions.count())
+        verified_sessions = getattr(obj, 'verified_sessions_count', 
+                                   obj.sessions.filter(is_verified=True).count())
+        
+        if total_sessions == 0:
+            return "No sessions"
+        
+        verification_percentage = (verified_sessions / total_sessions) * 100
+        color = 'green' if verification_percentage == 100 else 'orange' if verification_percentage >= 50 else 'red'
+        
+        return format_html(
+            '<span style="color: {};">{}/{} verified ({}%)</span>',
+            color, verified_sessions, total_sessions, round(verification_percentage)
+        )
+    verification_summary.short_description = 'Verification'
+    
+    def verification_summary_display(self, obj):
+        """Display detailed verification summary."""
+        total_sessions = obj.sessions.count()
+        verified_sessions = obj.sessions.filter(is_verified=True).count()
+        pending_sessions = total_sessions - verified_sessions
+        
+        return format_html(
+            'Total Sessions: {}<br>Verified: {}<br>Pending: {}',
+            total_sessions, verified_sessions, pending_sessions
+        )
+    verification_summary_display.short_description = 'Verification Summary'
     
     def dates_display(self, obj):
         """Display important dates."""
@@ -464,7 +570,26 @@ class GigAdmin(admin.ModelAdmin):
             f'{updated} gig(s) were marked as high priority.'
         )
     mark_as_high_priority.short_description = "Mark as high priority"
+    
+    def verify_all_sessions(self, request, queryset):
+        """Verify all sessions for selected gigs."""
+        total_verified = 0
+        for gig in queryset:
+            for session in gig.sessions.filter(is_verified=False):
+                if session.verify(request.user):
+                    total_verified += 1
+        
+        self.message_user(
+            request,
+            f'{total_verified} session(s) were verified across {queryset.count()} gig(s).'
+        )
+    verify_all_sessions.short_description = "Verify all sessions for selected gigs"
 
+
+# Need to import models for the queryset annotation
+from django.db import models
 
 # Customize admin site for gigs
-# To add a custom admin view (like reports), use custom admin URLs and views. See Django docs for 'AdminSite.get_urls' and custom admin views.
+admin.site.site_header = "Quest4Knowledge Gig Management"
+admin.site.site_title = "Q4K Admin"
+admin.site.index_title = "Welcome to Quest4Knowledge Gig Administration"
