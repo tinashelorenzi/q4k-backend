@@ -196,12 +196,14 @@ class Gig(models.Model):
     @property
     def hours_completed(self):
         """Calculate hours completed."""
-        return self.total_hours - self.total_hours_remaining
+        if self.total_hours and self.total_hours_remaining:
+            return self.total_hours - self.total_hours_remaining
+        return 0
     
     @property
     def completion_percentage(self):
         """Calculate completion percentage."""
-        if self.total_hours > 0:
+        if self.total_hours and self.total_hours > 0:
             completed = self.hours_completed
             return round((completed / self.total_hours) * 100, 2)
         return 0
@@ -209,26 +211,28 @@ class Gig(models.Model):
     @property
     def hourly_rate_tutor(self):
         """Calculate hourly rate for tutor."""
-        if self.total_hours > 0:
+        if self.total_hours and self.total_hours > 0:
             return round(self.total_tutor_remuneration / self.total_hours, 2)
         return 0
     
     @property
     def hourly_rate_client(self):
         """Calculate hourly rate charged to client."""
-        if self.total_hours > 0:
+        if self.total_hours and self.total_hours > 0:
             return round(self.total_client_fee / self.total_hours, 2)
         return 0
     
     @property
     def profit_margin(self):
         """Calculate profit margin (difference between client fee and tutor remuneration)."""
-        return self.total_client_fee - self.total_tutor_remuneration
+        if self.total_client_fee and self.total_tutor_remuneration:
+            return self.total_client_fee - self.total_tutor_remuneration
+        return 0
     
     @property
     def profit_percentage(self):
         """Calculate profit percentage."""
-        if self.total_client_fee > 0:
+        if self.total_client_fee and self.total_client_fee > 0:
             return round((self.profit_margin / self.total_client_fee) * 100, 2)
         return 0
     
