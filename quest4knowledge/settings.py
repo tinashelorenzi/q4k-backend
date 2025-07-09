@@ -116,11 +116,17 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Africa/Johannesburg'
 
 USE_I18N = True
 
 USE_TZ = True
+
+# Currency settings for ZAR (South African Rand)
+USE_L10N = True
+DECIMAL_SEPARATOR = '.'
+THOUSAND_SEPARATOR = ','
+NUMBER_GROUPING = 3
 
 
 # Static files (CSS, JavaScript, Images)

@@ -269,7 +269,7 @@ class TutorProfileAdmin(admin.ModelAdmin):
     def hourly_rate_display(self, obj):
         """Display hourly rate."""
         if obj.hourly_rate:
-            return f"${obj.hourly_rate}/hr"
+            return f"R{obj.hourly_rate:,.2f}/hr"
         return "Not set"
     hourly_rate_display.short_description = 'Hourly Rate'
     
@@ -650,6 +650,6 @@ class UserAdmin(BaseUserAdmin):
 
 
 # Customize admin site for users
-admin.site.site_header = "Quest4Knowledge User Management"
+admin.site.site_header = "Quest4Knowledge User Management (ZAR)"
 admin.site.site_title = "Q4K Admin"
 admin.site.index_title = "Welcome to Quest4Knowledge Administration"

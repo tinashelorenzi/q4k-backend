@@ -11,6 +11,13 @@ from django.urls import path
 from .models import Gig, GigSession
 
 
+def format_zar_currency(amount):
+    """Format amount as ZAR currency."""
+    if amount is None:
+        return "R0.00"
+    return f"R{amount:,.2f}"
+
+
 class GigSessionInline(admin.TabularInline):
     """
     Inline admin for GigSession within Gig admin.
@@ -464,10 +471,10 @@ class GigAdmin(admin.ModelAdmin):
     def financial_summary(self, obj):
         """Display financial summary."""
         return format_html(
-            'Client: ${}<br>Tutor: ${}<br>Profit: ${}',
-            obj.total_client_fee,
-            obj.total_tutor_remuneration,
-            obj.profit_margin
+            'Client: {}<br>Tutor: {}<br>Profit: {}',
+            format_zar_currency(obj.total_client_fee),
+            format_zar_currency(obj.total_tutor_remuneration),
+            format_zar_currency(obj.profit_margin)
         )
     financial_summary.short_description = 'Financials'
     
@@ -525,17 +532,17 @@ class GigAdmin(admin.ModelAdmin):
     def hourly_rates_display(self, obj):
         """Display hourly rates."""
         return format_html(
-            'Client Rate: ${}/hr<br>Tutor Rate: ${}/hr',
-            obj.hourly_rate_client,
-            obj.hourly_rate_tutor
+            'Client Rate: {}/hr<br>Tutor Rate: {}/hr',
+            format_zar_currency(obj.hourly_rate_client),
+            format_zar_currency(obj.hourly_rate_tutor)
         )
     hourly_rates_display.short_description = 'Hourly Rates'
     
     def profit_analysis_display(self, obj):
         """Display profit analysis."""
         return format_html(
-            'Profit: ${}<br>Margin: {}%',
-            obj.profit_margin,
+            'Profit: {}<br>Margin: {}%',
+            format_zar_currency(obj.profit_margin),
             obj.profit_percentage
         )
     profit_analysis_display.short_description = 'Profit Analysis'
@@ -654,6 +661,6 @@ class GigAdmin(admin.ModelAdmin):
 from django.db import models
 
 # Customize admin site for gigs
-admin.site.site_header = "Quest4Knowledge Gig Management"
+admin.site.site_header = "Quest4Knowledge Gig Management (ZAR)"
 admin.site.site_title = "Q4K Admin"
 admin.site.index_title = "Welcome to Quest4Knowledge Gig Administration"

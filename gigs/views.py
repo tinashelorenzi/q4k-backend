@@ -9,6 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.conf import settings
 from decimal import Decimal
+from .pagination import SessionPagination
 import logging
 
 from .models import Gig, GigSession
@@ -1188,6 +1189,98 @@ def verify_session(request, gig_id, session_id):
     
     except Exception as e:
         logger.error(f"Error in verify_session: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tutor_sessions_list(request, tutor_id):
+    """
+    GET: List all sessions for a specific tutor across all their gigs
+    """
+    try:
+        # Get tutor
+        try:
+            tutor = get_object_or_404(Tutor, pk=tutor_id)
+        except ValueError:
+            return Response({
+                'error': 'Invalid tutor ID format'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check permissions - user can only access their own sessions or be admin
+        if not (request.user.is_admin or request.user.is_staff or 
+                (hasattr(request.user, 'tutor_profile') and request.user.tutor_profile.id == tutor.id)):
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'You can only access your own sessions or be an administrator.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get all sessions for this tutor across all their gigs
+        queryset = GigSession.objects.filter(
+            gig__tutor=tutor
+        ).select_related(
+            'gig', 'verified_by'
+        ).order_by('-session_date', '-start_time')
+        
+        # Apply filtering if provided
+        # Filter by validation status
+        is_verified = request.GET.get('is_verified')
+        if is_verified is not None:
+            if is_verified.lower() == 'true':
+                queryset = queryset.filter(is_verified=True)
+            elif is_verified.lower() == 'false':
+                queryset = queryset.filter(is_verified=False)
+        
+        # Filter by date range
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        if start_date:
+            try:
+                start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(session_date__gte=start_date)
+            except ValueError:
+                return Response({
+                    'error': 'Invalid start_date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if end_date:
+            try:
+                end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+                queryset = queryset.filter(session_date__lte=end_date)
+            except ValueError:
+                return Response({
+                    'error': 'Invalid end_date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Filter by gig
+        gig_id = request.GET.get('gig_id')
+        if gig_id:
+            if gig_id.startswith('GIG-'):
+                try:
+                    numeric_id = int(gig_id.split('-')[1])
+                    queryset = queryset.filter(gig__pk=numeric_id)
+                except (ValueError, IndexError):
+                    return Response({
+                        'error': 'Invalid gig_id format'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                queryset = queryset.filter(gig__pk=gig_id)
+        
+        # Paginate results
+        paginator = SessionPagination()
+        page = paginator.paginate_queryset(queryset, request)
+        
+        if page is not None:
+            serializer = GigSessionDetailSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+        
+        serializer = GigSessionDetailSerializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    except Exception as e:
+        logger.error(f"Error in tutor_sessions_list: {str(e)}")
         return Response({
             'error': 'An unexpected error occurred.',
             'details': str(e) if settings.DEBUG else 'Please try again later.'

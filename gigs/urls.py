@@ -32,4 +32,7 @@ urlpatterns = [
     
     # Session verification (admin only)
     path('<str:gig_id>/sessions/<str:session_id>/verify/', views.verify_session, name='verify_session'),
+    
+    # NEW: Tutor Sessions endpoint
+    path('sessions/tutor/<str:tutor_id>/', views.tutor_sessions_list, name='tutor_sessions_list'),
 ]
