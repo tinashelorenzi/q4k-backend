@@ -31,7 +31,40 @@ from .serializers import (
 
 # Set up logging
 logger = logging.getLogger(__name__)
-
+def parse_gig_id(gig_id):
+    """
+    Parse gig ID and return the numeric ID.
+    Handles both 'GIG-0001' and 'GIG0001' formats.
+    """
+    print(f"DEBUG: parse_gig_id called with: '{gig_id}'")
+    
+    if gig_id.startswith('GIG-'):
+        # Handle GIG-0001 format
+        try:
+            result = int(gig_id.split('-')[1])
+            print(f"DEBUG: Parsed GIG- format, result: {result}")
+            return result
+        except (ValueError, IndexError):
+            print(f"DEBUG: Failed to parse GIG- format")
+            raise ValueError('Invalid gig ID format')
+    elif gig_id.startswith('GIG') and len(gig_id) > 3:
+        # Handle GIG0001 format
+        try:
+            result = int(gig_id[3:])  # Extract everything after 'GIG'
+            print(f"DEBUG: Parsed GIG format, result: {result}")
+            return result
+        except ValueError:
+            print(f"DEBUG: Failed to parse GIG format")
+            raise ValueError('Invalid gig ID format')
+    else:
+        # Assume it's already a numeric ID
+        try:
+            result = int(gig_id)
+            print(f"DEBUG: Parsed numeric format, result: {result}")
+            return result
+        except ValueError:
+            print(f"DEBUG: Failed to parse numeric format")
+            raise ValueError('Invalid gig ID format')
 
 class GigPagination(PageNumberPagination):
     """Custom pagination for gigs."""
@@ -915,26 +948,35 @@ def gig_sessions_list_create(request, gig_id):
     POST: Create a new session for a gig
     """
     try:
-        # Get gig
-        if gig_id.startswith('GIG-'):
-            try:
-                numeric_id = int(gig_id.split('-')[1])
-                gig = get_object_or_404(Gig, pk=numeric_id)
-            except (ValueError, IndexError):
-                return Response({
-                    'error': 'Invalid gig ID format'
-                }, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            gig = get_object_or_404(Gig, pk=gig_id)
+        print(f"DEBUG: Received gig_id: '{gig_id}' (type: {type(gig_id)})")
+        print(f"DEBUG: Request method: {request.method}")
+        print(f"DEBUG: Request data: {request.data}")
+        
+        # Get gig using the helper function
+        try:
+            numeric_id = parse_gig_id(gig_id)
+            print(f"DEBUG: Parsed numeric_id: {numeric_id}")
+            gig = get_object_or_404(Gig, pk=numeric_id)
+            print(f"DEBUG: Found gig: {gig.gig_id} (DB ID: {gig.id})")
+        except ValueError as e:
+            print(f"DEBUG: ValueError parsing gig_id: {e}")
+            return Response({
+                'error': 'Invalid gig ID format'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
         # Check permissions
+        print(f"DEBUG: User: {request.user.email}, User type: {request.user.user_type}")
         if not can_access_gig(request.user, gig):
+            print(f"DEBUG: Permission denied for user {request.user.email}")
             return Response({
                 'error': 'Permission denied',
                 'detail': 'You can only access sessions for your own gigs or be an administrator.'
             }, status=status.HTTP_403_FORBIDDEN)
         
+        print(f"DEBUG: Permission check passed")
+        
         if request.method == 'GET':
+            print(f"DEBUG: Processing GET request")
             queryset = gig.sessions.all().order_by('-session_date', '-start_time')
             
             # Paginate results
@@ -949,21 +991,28 @@ def gig_sessions_list_create(request, gig_id):
             return Response(serializer.data)
         
         elif request.method == 'POST':
+            print(f"DEBUG: Processing POST request")
+            
             # Check if user can create sessions
             if not can_modify_gig(request.user, gig):
+                print(f"DEBUG: User cannot modify gig")
                 return Response({
                     'error': 'Permission denied',
                     'detail': 'You can only create sessions for your own gigs or be an administrator.'
                 }, status=status.HTTP_403_FORBIDDEN)
             
+            print(f"DEBUG: User can modify gig")
+            
             # Add gig to data
             data = request.data.copy()
             data['gig'] = gig.id
+            print(f"DEBUG: Modified data with gig ID: {data}")
             
             serializer = GigSessionCreateSerializer(data=data)
+            print(f"DEBUG: Created serializer")
             
             if serializer.is_valid():
-                # Note: The session save method will automatically update gig hours
+                print(f"DEBUG: Serializer is valid")
                 session = serializer.save()
                 
                 logger.info(f"New session created for gig {gig.gig_id} by {request.user.email}")
@@ -972,19 +1021,39 @@ def gig_sessions_list_create(request, gig_id):
                     'message': 'Session created successfully',
                     'session': GigSessionDetailSerializer(session).data
                 }, status=status.HTTP_201_CREATED)
-            
-            return Response({
-                'error': 'Validation failed',
-                'details': serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                print(f"DEBUG: Serializer validation failed")
+                print(f"DEBUG: Serializer errors: {serializer.errors}")
+                
+                # Create user-friendly error message
+                error_messages = []
+                for field, errors in serializer.errors.items():
+                    if field == 'non_field_errors':
+                        error_messages.extend(errors)
+                    else:
+                        field_name = field.replace('_', ' ').title()
+                        for error in errors:
+                            error_messages.append(f"{field_name}: {error}")
+                
+                user_friendly_message = '; '.join(error_messages) if error_messages else 'Validation failed'
+                
+                return Response({
+                    'error': 'Validation failed',
+                    'message': user_friendly_message,  # Add user-friendly message
+                    'details': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
     
     except Exception as e:
+        print(f"DEBUG: Exception occurred: {str(e)}")
+        print(f"DEBUG: Exception type: {type(e)}")
+        import traceback
+        traceback.print_exc()
+        
         logger.error(f"Error in gig_sessions_list_create: {str(e)}")
         return Response({
             'error': 'An unexpected error occurred.',
             'details': str(e) if settings.DEBUG else 'Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(['GET', 'PUT', 'PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
