@@ -70,6 +70,15 @@ class Tutor(models.Model):
         help_text="Designates whether this tutor is blocked from the system"
     )
     
+    # Custom tutor ID field
+    tutor_id = models.CharField(
+        max_length=20,
+        unique=True,
+        blank=True,
+        null=True,
+        help_text="Custom tutor ID (e.g., TUT-0001). Leave blank to auto-generate."
+    )
+    
     # Timestamp fields
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -96,11 +105,13 @@ class Tutor(models.Model):
         return f"{self.full_name} (ID: {self.tutor_id})"
     
     @property
-    def tutor_id(self):
+    def tutor_id_display(self):
         """
-        Returns a formatted tutor ID based on the primary key.
-        Format: TUT-{padded_id} (e.g., TUT-0001)
+        Returns the tutor ID for display purposes.
+        If custom tutor_id is set, use it; otherwise generate from primary key.
         """
+        if self.tutor_id:
+            return self.tutor_id
         return f"TUT-{self.pk:04d}" if self.pk else "TUT-XXXX"
     
     @property
@@ -144,10 +155,20 @@ class Tutor(models.Model):
     
     def save(self, *args, **kwargs):
         """
-        Override save method to perform validation.
+        Override save method to perform validation and auto-generate tutor_id if needed.
         """
         self.clean()
-        super().save(*args, **kwargs)
+        
+        # Auto-generate tutor_id if not provided
+        if not self.tutor_id:
+            # First save to get the primary key
+            super().save(*args, **kwargs)
+            # Now generate the tutor_id
+            self.tutor_id = f"TUT-{self.pk:04d}"
+            # Save again with the generated tutor_id
+            super().save(update_fields=['tutor_id'])
+        else:
+            super().save(*args, **kwargs)
     
     def deactivate(self):
         """

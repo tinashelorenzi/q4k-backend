@@ -41,7 +41,6 @@ class TutorAdmin(admin.ModelAdmin):
     
     # Fields that are read-only
     readonly_fields = (
-        'tutor_id_display',
         'created_at',
         'updated_at',
         'status_display',
@@ -57,7 +56,7 @@ class TutorAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Personal Information', {
             'fields': (
-                'tutor_id_display',
+                'tutor_id',
                 ('first_name', 'last_name'),
                 'email_address',
                 'phone_number',
@@ -92,9 +91,9 @@ class TutorAdmin(admin.ModelAdmin):
     
     def tutor_id_display(self, obj):
         """Display formatted tutor ID."""
-        return obj.tutor_id
+        return obj.tutor_id_display
     tutor_id_display.short_description = 'Tutor ID'
-    tutor_id_display.admin_order_field = 'pk'
+    tutor_id_display.admin_order_field = 'tutor_id'
     
     def full_name_display(self, obj):
         """Display full name with a link to edit."""
