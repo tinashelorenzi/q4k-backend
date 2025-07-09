@@ -4,6 +4,10 @@ from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.db.models import Sum, Count
 from django.utils import timezone
+from django.shortcuts import redirect, get_object_or_404
+from django.contrib import messages
+from django.http import HttpResponseRedirect
+from django.urls import path
 from .models import Gig, GigSession
 
 
@@ -45,6 +49,7 @@ class GigSessionAdmin(admin.ModelAdmin):
         'verification_status_display',
         'verified_by_display',
         'created_at_display',
+        'verification_actions',
     )
     
     list_filter = (
@@ -74,6 +79,7 @@ class GigSessionAdmin(admin.ModelAdmin):
         'verified_by',
         'verified_at',
         'is_verified',
+        'verification_actions',
     )
     
     ordering = ('-session_date', '-start_time')
@@ -167,6 +173,25 @@ class GigSessionAdmin(admin.ModelAdmin):
     created_at_display.short_description = 'Created'
     created_at_display.admin_order_field = 'created_at'
     
+    def verification_actions(self, obj):
+        """Display verification action buttons."""
+        if obj.is_verified:
+            # Show unverify button for verified sessions
+            unverify_url = reverse('admin:gigs_gigsession_unverify', args=[obj.pk])
+            return format_html(
+                '<a class="button" href="{}" style="background-color: #dc3545; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px;">Reject</a>',
+                unverify_url
+            )
+        else:
+            # Show verify button for unverified sessions
+            verify_url = reverse('admin:gigs_gigsession_verify', args=[obj.pk])
+            return format_html(
+                '<a class="button" href="{}" style="background-color: #28a745; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px;">Validate</a>',
+                verify_url
+            )
+    verification_actions.short_description = 'Actions'
+    verification_actions.allow_tags = True
+    
     # Custom Actions
     def verify_selected_sessions(self, request, queryset):
         """Verify selected sessions."""
@@ -193,6 +218,45 @@ class GigSessionAdmin(admin.ModelAdmin):
             f'{updated} session(s) were unverified successfully.'
         )
     unverify_selected_sessions.short_description = "Unverify selected sessions"
+    
+    def get_urls(self):
+        """Add custom URLs for verification actions."""
+        urls = super().get_urls()
+        custom_urls = [
+            path(
+                '<int:session_id>/verify/',
+                self.admin_site.admin_view(self.verify_session_view),
+                name='gigs_gigsession_verify',
+            ),
+            path(
+                '<int:session_id>/unverify/',
+                self.admin_site.admin_view(self.unverify_session_view),
+                name='gigs_gigsession_unverify',
+            ),
+        ]
+        return custom_urls + urls
+    
+    def verify_session_view(self, request, session_id):
+        """Custom view to verify a session."""
+        session = get_object_or_404(GigSession, pk=session_id)
+        
+        if session.verify(request.user):
+            messages.success(request, f'Session {session.session_id} has been verified successfully.')
+        else:
+            messages.error(request, f'Session {session.session_id} is already verified.')
+        
+        return HttpResponseRedirect(reverse('admin:gigs_gigsession_changelist'))
+    
+    def unverify_session_view(self, request, session_id):
+        """Custom view to unverify a session."""
+        session = get_object_or_404(GigSession, pk=session_id)
+        
+        if session.unverify():
+            messages.success(request, f'Session {session.session_id} has been unverified successfully.')
+        else:
+            messages.error(request, f'Session {session.session_id} is not verified.')
+        
+        return HttpResponseRedirect(reverse('admin:gigs_gigsession_changelist'))
 
 
 @admin.register(Gig)
