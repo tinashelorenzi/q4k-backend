@@ -75,13 +75,22 @@ def login_view(request):
                 'message': 'Login successful'
             }
             
-            # Add tutor profile if user is a tutor
+            # Add tutor information if user is a tutor
             if user.is_tutor:
                 try:
                     tutor_profile = user.tutor_profile
                     response_data['tutor_profile'] = TutorProfileSerializer(tutor_profile).data
+                    
+                    # Add tutor record information if linked
+                    if tutor_profile.tutor:
+                        from tutors.serializers import TutorSerializer
+                        response_data['tutor'] = TutorSerializer(tutor_profile.tutor).data
+                    else:
+                        response_data['tutor'] = None
+                        
                 except TutorProfile.DoesNotExist:
                     response_data['tutor_profile'] = None
+                    response_data['tutor'] = None
             
             # Log successful login
             logger.info(f"Successful login for user {user.email} from IP {ip_address}")
@@ -194,13 +203,22 @@ def user_profile_view(request):
             'user': UserSerializer(user).data
         }
         
-        # Add tutor profile if user is a tutor
+        # Add tutor information if user is a tutor
         if user.is_tutor:
             try:
                 tutor_profile = user.tutor_profile
                 response_data['tutor_profile'] = TutorProfileSerializer(tutor_profile).data
+                
+                # Add tutor record information if linked
+                if tutor_profile.tutor:
+                    from tutors.serializers import TutorSerializer
+                    response_data['tutor'] = TutorSerializer(tutor_profile.tutor).data
+                else:
+                    response_data['tutor'] = None
+                    
             except TutorProfile.DoesNotExist:
                 response_data['tutor_profile'] = None
+                response_data['tutor'] = None
         
         return Response(response_data, status=status.HTTP_200_OK)
         

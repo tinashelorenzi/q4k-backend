@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-8#0r+hr^-&dc1dkko_6mk(hsuv*4i*pu+yk^cqc36no#s&$j)-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
 
 
 # Application definition
@@ -42,7 +42,7 @@ INSTALLED_APPS = [
     # Third party apps
     'rest_framework',
     'rest_framework_simplejwt',
-    'corsheaders',
+    'corsheaders',  # CORS headers for frontend communication
     
     # Local apps
     'tutors.apps.TutorsConfig',
@@ -51,7 +51,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',  # CORS must be at the top
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -180,16 +180,71 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
 }
 
-# CORS settings (for frontend development)
+# CORS settings (CRITICAL FOR FRONTEND COMMUNICATION)
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React default
-    "http://localhost:8080",  # Vue default
+    "http://localhost:3000",    # React default
+    "http://localhost:5173",    # Vite default (YOUR FRONTEND)
+    "http://localhost:8080",    # Vue default
     "http://127.0.0.1:3000",
+    "http://127.0.0.1:5173",    # Vite default (YOUR FRONTEND)
     "http://127.0.0.1:8080",
 ]
 
+# Allow credentials (cookies, authorization headers, etc.)
 CORS_ALLOW_CREDENTIALS = True
+
+# Additional CORS settings for development
+CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all origins in development
+
+# Allowed headers for CORS requests
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+# Allowed methods for CORS requests
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# Preflight max age (how long browsers can cache the preflight response)
+CORS_PREFLIGHT_MAX_AGE = 86400
 
 # Media files
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# Additional settings for development
+if DEBUG:
+    # More permissive CORS settings for development
+    CORS_ALLOW_ALL_ORIGINS = True
+    
+    # Logging for debugging CORS issues
+    LOGGING = {
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+            },
+        },
+        'loggers': {
+            'corsheaders': {
+                'handlers': ['console'],
+                'level': 'DEBUG',
+                'propagate': True,
+            },
+        },
+    }

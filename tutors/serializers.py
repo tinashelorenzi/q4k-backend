@@ -70,7 +70,7 @@ class TutorProfileSerializer(serializers.ModelSerializer):
     """
     Serializer for the TutorProfile model.
     """
-    subjects_list = serializers.ListField(source='subjects_list', read_only=True)
+    subjects_list = serializers.ListField(read_only=True)
     
     class Meta:
         model = TutorProfile
