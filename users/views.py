@@ -9,6 +9,15 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from django.conf import settings
+from django.db import transaction
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
+from django.conf import settings
+from django.core.mail import EmailMultiAlternatives
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.core.exceptions import ValidationError as DjangoValidationError
 import logging
 
 from .models import User, TutorProfile
@@ -19,7 +28,11 @@ from .serializers import (
     TutorProfileSerializer,
     LogoutSerializer,
     TokenRefreshResponseSerializer,
-    UserSettingsSerializer
+    UserSettingsSerializer,
+    BatchTutorImportSerializer,
+    AccountSetupSerializer,
+    TokenVerificationSerializer,
+    AccountSetupToken,
 )
 
 # Set up logging
@@ -480,3 +493,273 @@ def deactivate_account(request):
         return Response({
             'error': 'An unexpected error occurred while deactivating account.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def batch_tutor_import(request):
+    """
+    API endpoint for batch tutor import via CSV content.
+    
+    Expects JSON payload with:
+    {
+        "csv_content": "first_name,last_name,email\nJohn,Doe,john@example.com\n..."
+    }
+    
+    Returns summary of import results.
+    """
+    # Check if user has permission (you can customize this)
+    if not request.user.user_type in ['admin', 'manager']:
+        return Response(
+            {'error': 'You do not have permission to perform batch imports.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    serializer = BatchTutorImportSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    tutors_data = serializer.validated_data['csv_content']
+    
+    try:
+        with transaction.atomic():
+            # Create account setup tokens for all tutors
+            tokens_created = []
+            
+            for tutor_data in tutors_data:
+                token = AccountSetupToken.objects.create(
+                    email=tutor_data['email'],
+                    first_name=tutor_data['first_name'],
+                    last_name=tutor_data['last_name'],
+                    tutor_id=tutor_data['tutor_id']
+                )
+                tokens_created.append(token)
+            
+            # Send emails to all tutors
+            successful_emails = []
+            failed_emails = []
+            
+            for token in tokens_created:
+                try:
+                    if send_account_setup_email(token):
+                        successful_emails.append(token.email)
+                    else:
+                        failed_emails.append(token.email)
+                except Exception as e:
+                    logger.error(f"Error sending email to {token.email}: {str(e)}")
+                    failed_emails.append(token.email)
+            
+            # Send summary email to admin
+            try:
+                send_batch_import_summary_email(
+                    admin_email=request.user.email,
+                    total_count=len(tutors_data),
+                    success_count=len(successful_emails),
+                    failed_emails=failed_emails if failed_emails else None
+                )
+            except Exception as e:
+                logger.error(f"Failed to send summary email: {str(e)}")
+            
+            return Response({
+                'message': 'Batch import completed',
+                'total_tutors': len(tutors_data),
+                'successful_emails': len(successful_emails),
+                'failed_emails': len(failed_emails),
+                'successful_emails_list': successful_emails,
+                'failed_emails_list': failed_emails,
+            }, status=status.HTTP_201_CREATED)
+    
+    except Exception as e:
+        logger.error(f"Batch import failed: {str(e)}")
+        return Response(
+            {'error': 'An error occurred during batch import. Please try again.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def verify_setup_token(request):
+    """
+    API endpoint to verify a setup token and get basic info.
+    
+    Query params: ?token=<token_value>
+    
+    Returns token validity and associated user info.
+    """
+    token = request.query_params.get('token')
+    if not token:
+        return Response(
+            {'error': 'Token parameter is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    serializer = TokenVerificationSerializer(data={'token': token})
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        token_obj = AccountSetupToken.objects.get(token=token)
+        return Response({
+            'valid': True,
+            'first_name': token_obj.first_name,
+            'last_name': token_obj.last_name,
+            'email': token_obj.email,
+            'tutor_id': token_obj.tutor_id,
+            'expires_at': token_obj.expires_at,
+        })
+    except AccountSetupToken.DoesNotExist:
+        return Response(
+            {'error': 'Invalid token'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def complete_account_setup(request):
+    """
+    API endpoint to complete account setup using a token.
+    
+    Expects JSON payload with:
+    {
+        "token": "token_value",
+        "password": "secure_password",
+        "confirm_password": "secure_password",
+        "phone_number": "+1234567890", // optional
+        "physical_address": "123 Main St..." // optional
+    }
+    
+    Creates User, Tutor, and TutorProfile records.
+    """
+    serializer = AccountSetupSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    token_obj = serializer.validated_data['token_obj']
+    
+    try:
+        with transaction.atomic():
+            # Create User account
+            user = User.objects.create_user(
+                username=token_obj.email,  # Use email as username
+                email=token_obj.email,
+                first_name=token_obj.first_name,
+                last_name=token_obj.last_name,
+                password=serializer.validated_data['password'],
+                user_type='tutor',
+                is_verified=True,  # Since they came from admin import
+                is_approved=True,  # Since they came from admin import
+            )
+            
+            # Create Tutor record
+            tutor = Tutor.objects.create(
+                first_name=token_obj.first_name,
+                last_name=token_obj.last_name,
+                email_address=token_obj.email,
+                phone_number=serializer.validated_data.get('phone_number', ''),
+                physical_address=serializer.validated_data.get('physical_address', ''),
+                tutor_id=token_obj.tutor_id  # Use the tutor_id from CSV
+            )
+            
+            # Create TutorProfile
+            tutor_profile = TutorProfile.objects.create(
+                user=user,
+                tutor=tutor,
+                bio='',  # They can fill this later
+                subjects_of_expertise='',  # They can fill this later
+                years_of_experience=0,
+                hourly_rate=None,
+                is_available=True,
+            )
+            
+            # Mark token as used
+            token_obj.is_used = True
+            token_obj.used_at = timezone.now()
+            token_obj.save()
+            
+            # Generate JWT tokens for immediate login
+            tokens = get_tokens_for_user(user)
+            
+            return Response({
+                'message': 'Account setup completed successfully',
+                'user': {
+                    'id': user.id,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'user_type': user.user_type,
+                },
+                'tutor': {
+                    'id': tutor.id,
+                    'tutor_id': tutor.tutor_id,
+                    'full_name': tutor.full_name,
+                },
+                'tokens': tokens,
+            }, status=status.HTTP_201_CREATED)
+    
+    except Exception as e:
+        logger.error(f"Account setup failed for {token_obj.email}: {str(e)}")
+        return Response(
+            {'error': 'An error occurred during account setup. Please try again.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def batch_import_history(request):
+    """
+    API endpoint to get batch import history.
+    Shows pending and used tokens.
+    """
+    # Check permissions
+    if not request.user.user_type in ['admin', 'manager']:
+        return Response(
+            {'error': 'You do not have permission to view batch import history.'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Get query parameters
+    status_filter = request.query_params.get('status', 'all')  # all, pending, used, expired
+    
+    # Base queryset
+    queryset = AccountSetupToken.objects.all()
+    
+    # Apply filters
+    if status_filter == 'pending':
+        queryset = queryset.filter(is_used=False, expires_at__gt=timezone.now())
+    elif status_filter == 'used':
+        queryset = queryset.filter(is_used=True)
+    elif status_filter == 'expired':
+        queryset = queryset.filter(is_used=False, expires_at__lte=timezone.now())
+    
+    # Get paginated results
+    from django.core.paginator import Paginator
+    
+    paginator = Paginator(queryset, 20)  # 20 items per page
+    page_number = request.query_params.get('page', 1)
+    page_obj = paginator.get_page(page_number)
+    
+    # Serialize data
+    tokens_data = []
+    for token in page_obj:
+        tokens_data.append({
+            'id': token.id,
+            'email': token.email,
+            'first_name': token.first_name,
+            'last_name': token.last_name,
+            'tutor_id': token.tutor_id,
+            'is_used': token.is_used,
+            'is_expired': token.is_expired(),
+            'created_at': token.created_at,
+            'expires_at': token.expires_at,
+            'used_at': token.used_at,
+        })
+    
+    return Response({
+        'tokens': tokens_data,
+        'pagination': {
+            'current_page': page_obj.number,
+            'total_pages': paginator.num_pages,
+            'total_count': paginator.count,
+            'has_next': page_obj.has_next(),
+            'has_previous': page_obj.has_previous(),
+        }
+    })

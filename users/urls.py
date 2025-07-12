@@ -22,4 +22,10 @@ urlpatterns = [
     # Account settings
     path('settings/', views.user_settings, name='user_settings'),
     path('deactivate/', views.deactivate_account, name='deactivate_account'),
+
+    # Batch import endpoints
+    path('batch-import/', views.batch_tutor_import, name='batch_tutor_import'),
+    path('verify-token/', views.verify_setup_token, name='verify_setup_token'),
+    path('complete-setup/', views.complete_account_setup, name='complete_account_setup'),
+    path('import-history/', views.batch_import_history, name='batch_import_history'),
 ]

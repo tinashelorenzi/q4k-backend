@@ -3,6 +3,11 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.utils import timezone
 from .models import User, TutorProfile
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
+import csv
+import io
+from .models import AccountSetupToken
 
 
 class LoginSerializer(serializers.Serializer):
@@ -289,3 +294,191 @@ class UserBasicSerializer(serializers.ModelSerializer):
             data['phone_number'] = instance.phone_number
             
         return data
+
+class BatchTutorImportSerializer(serializers.Serializer):
+    """
+    Serializer for batch tutor import via CSV content.
+    """
+    csv_content = serializers.CharField(
+        help_text="CSV content with tutor data (name, email columns required)"
+    )
+    
+    def validate_csv_content(self, value):
+        """Validate CSV content and extract tutor data."""
+        if not value.strip():
+            raise serializers.ValidationError("CSV content cannot be empty.")
+        
+        try:
+            # Parse CSV content
+            csv_reader = csv.DictReader(io.StringIO(value.strip()))
+            
+            # Check if required headers exist
+            headers = csv_reader.fieldnames
+            if not headers:
+                raise serializers.ValidationError("CSV must have headers.")
+            
+            # Convert headers to lowercase for case-insensitive matching
+            headers_lower = [h.lower().strip() for h in headers]
+            
+            # Check for required columns (flexible naming)
+            required_mappings = {
+                'first_name': ['first_name', 'firstname', 'first name', 'name'],
+                'last_name': ['last_name', 'lastname', 'last name', 'surname'],
+                'email': ['email', 'email_address', 'email address', 'e-mail'],
+                'tutor_id': ['tutor_id', 'tutorid', 'tutor id', 'id', 'tutor_code', 'code']
+            }
+            
+            field_mapping = {}
+            for required_field, possible_names in required_mappings.items():
+                found = False
+                for possible_name in possible_names:
+                    if possible_name in headers_lower:
+                        # Get the original header name
+                        original_header = headers[headers_lower.index(possible_name)]
+                        field_mapping[required_field] = original_header
+                        found = True
+                        break
+                
+                if not found:
+                    raise serializers.ValidationError(
+                        f"Required column not found. Need one of: {', '.join(possible_names)}"
+                    )
+            
+            # Parse and validate rows
+            tutors_data = []
+            row_number = 1
+            
+            for row in csv_reader:
+                row_number += 1
+                
+                try:
+                    # Extract data using field mapping
+                    first_name = row[field_mapping['first_name']].strip()
+                    last_name = row[field_mapping['last_name']].strip()
+                    email = row[field_mapping['email']].strip().lower()
+                    tutor_id = row[field_mapping['tutor_id']].strip().upper()  # Standardize to uppercase
+                    
+                    # Validate required fields
+                    if not first_name:
+                        raise serializers.ValidationError(f"Row {row_number}: First name is required.")
+                    if not last_name:
+                        raise serializers.ValidationError(f"Row {row_number}: Last name is required.")
+                    if not email:
+                        raise serializers.ValidationError(f"Row {row_number}: Email is required.")
+                    if not tutor_id:
+                        raise serializers.ValidationError(f"Row {row_number}: Tutor ID is required.")
+                    
+                    # Validate email format
+                    try:
+                        validate_email(email)
+                    except DjangoValidationError:
+                        raise serializers.ValidationError(f"Row {row_number}: Invalid email format: {email}")
+                    
+                    # Check for duplicates in current batch
+                    if any(t['email'] == email for t in tutors_data):
+                        raise serializers.ValidationError(f"Row {row_number}: Duplicate email in CSV: {email}")
+                    
+                    if any(t['tutor_id'] == tutor_id for t in tutors_data):
+                        raise serializers.ValidationError(f"Row {row_number}: Duplicate tutor ID in CSV: {tutor_id}")
+                    
+                    # Check if email already exists in system
+                    from django.contrib.auth import get_user_model
+                    from tutors.models import Tutor
+                    User = get_user_model()
+                    
+                    if User.objects.filter(email=email).exists():
+                        raise serializers.ValidationError(f"Row {row_number}: User with email {email} already exists.")
+                    
+                    if Tutor.objects.filter(email_address=email).exists():
+                        raise serializers.ValidationError(f"Row {row_number}: Tutor with email {email} already exists.")
+                    
+                    if Tutor.objects.filter(tutor_id=tutor_id).exists():
+                        raise serializers.ValidationError(f"Row {row_number}: Tutor with ID {tutor_id} already exists.")
+                    
+                    if AccountSetupToken.objects.filter(email=email, is_used=False).exists():
+                        raise serializers.ValidationError(f"Row {row_number}: Pending setup token for {email} already exists.")
+                    
+                    if AccountSetupToken.objects.filter(tutor_id=tutor_id, is_used=False).exists():
+                        raise serializers.ValidationError(f"Row {row_number}: Pending setup token for tutor ID {tutor_id} already exists.")
+                    
+                    tutors_data.append({
+                        'first_name': first_name,
+                        'last_name': last_name,
+                        'email': email,
+                        'tutor_id': tutor_id
+                    })
+                    
+                except KeyError as e:
+                    raise serializers.ValidationError(f"Row {row_number}: Missing column data.")
+            
+            if not tutors_data:
+                raise serializers.ValidationError("No valid tutor data found in CSV.")
+            
+            return tutors_data
+            
+        except csv.Error as e:
+            raise serializers.ValidationError(f"CSV parsing error: {str(e)}")
+
+class AccountSetupSerializer(serializers.Serializer):
+    """
+    Serializer for account setup using token.
+    """
+    token = serializers.CharField(max_length=64)
+    password = serializers.CharField(write_only=True, min_length=8)
+    confirm_password = serializers.CharField(write_only=True)
+    
+    # Optional additional fields
+    phone_number = serializers.CharField(max_length=17, required=False, allow_blank=True)
+    physical_address = serializers.CharField(max_length=300, required=False, allow_blank=True)
+    
+    def validate(self, data):
+        """Validate password confirmation and token."""
+        # Check password confirmation
+        if data['password'] != data['confirm_password']:
+            raise serializers.ValidationError("Passwords do not match.")
+        
+        # Validate token
+        try:
+            token_obj = AccountSetupToken.objects.get(token=data['token'])
+            if not token_obj.is_valid():
+                if token_obj.is_used:
+                    raise serializers.ValidationError("This setup link has already been used.")
+                else:
+                    raise serializers.ValidationError("This setup link has expired.")
+            data['token_obj'] = token_obj
+        except AccountSetupToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid setup token.")
+        
+        return data
+    
+    def validate_password(self, value):
+        """Validate password strength."""
+        from django.contrib.auth.password_validation import validate_password
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        
+        return value
+
+
+class TokenVerificationSerializer(serializers.Serializer):
+    """
+    Serializer for verifying a setup token.
+    """
+    token = serializers.CharField(max_length=64)
+    
+    def validate_token(self, value):
+        """Validate token exists and is valid."""
+        try:
+            token_obj = AccountSetupToken.objects.get(token=value)
+            if not token_obj.is_valid():
+                if token_obj.is_used:
+                    raise serializers.ValidationError("This setup link has already been used.")
+                else:
+                    raise serializers.ValidationError("This setup link has expired.")
+            return value
+        except AccountSetupToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid setup token.")

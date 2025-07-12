@@ -3,6 +3,7 @@ from django.db import models
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from datetime import timedelta
+import secrets
 
 
 class User(AbstractUser):
@@ -429,3 +430,89 @@ class UserSession(models.Model):
     
     def __str__(self):
         return f"{self.user.username} - {self.ip_address}"
+
+class AccountSetupToken(models.Model):
+    """
+    Model to store tokens for batch account creation.
+    """
+    
+    email = models.EmailField(
+        help_text="Email address for the account setup"
+    )
+    
+    first_name = models.CharField(
+        max_length=50,
+        help_text="First name from batch import"
+    )
+    
+    last_name = models.CharField(
+        max_length=50,
+        help_text="Last name from batch import"
+    )
+    
+    tutor_id = models.CharField(
+        max_length=20,
+        blank=True,
+        null=True,
+        help_text="Tutor ID from batch import"
+    )
+    
+    token = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text="Unique token for account setup"
+    )
+    
+    is_used = models.BooleanField(
+        default=False,
+        help_text="Whether this token has been used"
+    )
+    
+    expires_at = models.DateTimeField(
+        help_text="When this token expires"
+    )
+    
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        help_text="When this token was created"
+    )
+    
+    used_at = models.DateTimeField(
+        blank=True,
+        null=True,
+        help_text="When this token was used"
+    )
+    
+    class Meta:
+        db_table = 'account_setup_tokens'
+        ordering = ['-created_at']
+        verbose_name = 'Account Setup Token'
+        verbose_name_plural = 'Account Setup Tokens'
+        indexes = [
+            models.Index(fields=['token']),
+            models.Index(fields=['email']),
+            models.Index(fields=['tutor_id']),
+            models.Index(fields=['expires_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.email} - {'Used' if self.is_used else 'Pending'}"
+    
+    def save(self, *args, **kwargs):
+        # Auto-generate token if not provided
+        if not self.token:
+            self.token = secrets.token_urlsafe(48)
+        
+        # Set expiration if not provided (7 days from now)
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(days=7)
+        
+        super().save(*args, **kwargs)
+    
+    def is_expired(self):
+        """Check if the token has expired."""
+        return timezone.now() > self.expires_at
+    
+    def is_valid(self):
+        """Check if the token is valid (not used and not expired)."""
+        return not self.is_used and not self.is_expired()

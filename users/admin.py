@@ -1,10 +1,17 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.html import format_html
-from django.urls import reverse
+from django.urls import reverse, path
 from django.utils import timezone
 from django.db.models import Count
-from .models import User, TutorProfile, UserSession
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.db import transaction
+from django.utils import timezone
+import csv
+import io
+from .models import User, TutorProfile, UserSession, AccountSetupToken
+from .utils import send_account_setup_email, send_batch_import_summary_email
 
 
 class TutorProfileInline(admin.StackedInline):
@@ -473,6 +480,30 @@ class UserAdmin(BaseUserAdmin):
         'reset_failed_login_attempts',
     ]
 
+    def changelist_view(self, request, extra_context=None):
+        """Add batch import button to the changelist view."""
+        extra_context = extra_context or {}
+        extra_context['show_batch_import'] = True
+        extra_context['batch_import_url'] = reverse('admin:users_accountsetuptoken_batch_import')
+        extra_context['import_history_url'] = reverse('admin:users_accountsetuptoken_import_history')
+        return super().changelist_view(request, extra_context)
+
+    def get_urls(self):
+        """Add custom URLs for batch import access."""
+        urls = super().get_urls()
+        custom_urls = [
+            path('batch-import/', self.admin_site.admin_view(self.redirect_to_batch_import), name='users_user_batch_import'),
+            path('import-history/', self.admin_site.admin_view(self.redirect_to_import_history), name='users_user_import_history'),
+        ]
+        return custom_urls + urls
+
+    def redirect_to_batch_import(self, request):
+        """Redirect to the actual batch import page."""
+        return redirect('admin:users_accountsetuptoken_batch_import')
+
+    def redirect_to_import_history(self, request):
+        """Redirect to the actual import history page."""
+        return redirect('admin:users_accountsetuptoken_import_history')
 
     
     def get_queryset(self, request):
@@ -520,8 +551,6 @@ class UserAdmin(BaseUserAdmin):
             '<span style="color: {};">{}</span>',
             color, obj.get_user_type_display()
         )
-    user_type_display.short_description = 'User Type'
-    user_type_display.admin_order_field = 'user_type'
     
     def status_display(self, obj):
         """Display account status."""
@@ -681,6 +710,314 @@ class UserAdmin(BaseUserAdmin):
         )
     reset_failed_login_attempts.short_description = "Reset failed login attempts"
 
+
+@admin.register(AccountSetupToken)
+class AccountSetupTokenAdmin(admin.ModelAdmin):
+    list_display = [
+        'tutor_id',
+        'email', 
+        'first_name', 
+        'last_name', 
+        'status_display',
+        'created_at', 
+        'expires_at',
+        'used_at'
+    ]
+    list_filter = [
+        'is_used',
+        'created_at',
+        'expires_at'
+    ]
+    search_fields = [
+        'email',
+        'first_name', 
+        'last_name',
+        'tutor_id',
+        'token'
+    ]
+    readonly_fields = [
+        'token',
+        'created_at',
+        'used_at',
+        'setup_link'
+    ]
+    ordering = ['-created_at']
+    
+    # Add custom URLs
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('batch-import/', self.batch_import_view, name='users_accountsetuptoken_batch_import'),
+            path('import-history/', self.import_history_view, name='users_accountsetuptoken_import_history'),
+        ]
+        return custom_urls + urls
+    
+    # Add custom buttons to the top of the changelist
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['custom_buttons'] = [
+            {
+                'url': reverse('admin:accountsetuptoken_batch_import'),
+                'name': 'Batch Import Tutors',
+                'class': 'addlink',
+            },
+            {
+                'url': reverse('admin:accountsetuptoken_import_history'),
+                'name': 'Import History',
+                'class': 'viewlink',
+            }
+        ]
+        return super().changelist_view(request, extra_context)
+    
+    def status_display(self, obj):
+        """Display colored status based on token state."""
+        if obj.is_used:
+            return format_html(
+                '<span style="color: green; font-weight: bold;">✓ Used</span>'
+            )
+        elif obj.is_expired():
+            return format_html(
+                '<span style="color: red; font-weight: bold;">✗ Expired</span>'
+            )
+        else:
+            return format_html(
+                '<span style="color: orange; font-weight: bold;">⏳ Pending</span>'
+            )
+    
+    status_display.short_description = 'Status'
+    
+    def setup_link(self, obj):
+        """Display the setup link for easy copying."""
+        if not obj.is_used and not obj.is_expired():
+            link = f"http://localhost:5173/setup-account?token={obj.token}"
+            return format_html(
+                '<a href="{}" target="_blank" style="color: blue;">{}</a>',
+                link,
+                link
+            )
+        return "N/A"
+    
+    setup_link.short_description = 'Setup Link'
+    
+    fieldsets = (
+        ('Token Information', {
+            'fields': ('token', 'setup_link')
+        }),
+        ('User Details', {
+            'fields': ('tutor_id', 'email', 'first_name', 'last_name')
+        }),
+        ('Status', {
+            'fields': ('is_used', 'expires_at')
+        }),
+        ('Timestamps', {
+            'fields': ('created_at', 'used_at'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def has_add_permission(self, request):
+        """Disable manual token creation through admin."""
+        return False
+    
+    def has_change_permission(self, request, obj=None):
+        """Only allow viewing, not editing."""
+        return True
+    
+    def has_delete_permission(self, request, obj=None):
+        """Allow deletion of expired/used tokens."""
+        if obj:
+            return obj.is_used or obj.is_expired()
+        return True
+    
+    # Batch import view
+    def batch_import_view(self, request):
+        """Handle the batch import form and processing"""
+        if request.method == 'POST':
+            csv_file = request.FILES.get('csv_file')
+            csv_content = request.POST.get('csv_content', '').strip()
+            
+            # Determine which input method was used
+            if csv_file:
+                try:
+                    content = csv_file.read().decode('utf-8')
+                except UnicodeDecodeError:
+                    messages.error(request, 'Invalid file encoding. Please use UTF-8.')
+                    return redirect('admin:users_accountsetuptoken_batch_import')
+            elif csv_content:
+                content = csv_content
+            else:
+                messages.error(request, 'Please provide either a CSV file or paste CSV content.')
+                return redirect('admin:users_accountsetuptoken_batch_import')
+            
+            # Process the CSV content
+            try:
+                result = self.process_csv_content(content, request.user)
+                if result['success']:
+                    messages.success(
+                        request, 
+                        f"Batch import completed! {result['successful_emails']} emails sent successfully out of {result['total_tutors']} tutors."
+                    )
+                    if result['failed_emails']:
+                        messages.warning(
+                            request,
+                            f"Failed to send emails to: {', '.join(result['failed_emails'])}"
+                        )
+                    return redirect('admin:users_accountsetuptoken_changelist')
+                else:
+                    messages.error(request, f"Import failed: {result['error']}")
+            except Exception as e:
+                messages.error(request, f"An error occurred: {str(e)}")
+            
+            return redirect('admin:users_accountsetuptoken_batch_import')
+        
+        # GET request - show the form
+        context = {
+            'title': 'Batch Import Tutors',
+            'opts': self.model._meta,
+            'has_view_permission': True,
+        }
+        return render(request, 'admin/users/batch_import.html', context)
+    
+    def import_history_view(self, request):
+        """Show import history"""
+        tokens = AccountSetupToken.objects.all().order_by('-created_at')[:50]
+        
+        context = {
+            'title': 'Batch Import History',
+            'tokens': tokens,
+            'opts': self.model._meta,
+            'has_view_permission': True,
+        }
+        return render(request, 'admin/users/import_history.html', context)
+    
+    def process_csv_content(self, content, admin_user):
+        """Process CSV content and create tokens - same as before"""
+        try:
+            csv_reader = csv.DictReader(io.StringIO(content.strip()))
+            headers = csv_reader.fieldnames
+            
+            if not headers:
+                return {'success': False, 'error': 'CSV must have headers'}
+            
+            headers_lower = [h.lower().strip() for h in headers]
+            
+            required_mappings = {
+                'first_name': ['first_name', 'firstname', 'first name', 'name'],
+                'last_name': ['last_name', 'lastname', 'last name', 'surname'],
+                'email': ['email', 'email_address', 'email address', 'e-mail'],
+                'tutor_id': ['tutor_id', 'tutorid', 'tutor id', 'id', 'tutor_code', 'code']
+            }
+            
+            field_mapping = {}
+            for required_field, possible_names in required_mappings.items():
+                found = False
+                for possible_name in possible_names:
+                    if possible_name in headers_lower:
+                        original_header = headers[headers_lower.index(possible_name)]
+                        field_mapping[required_field] = original_header
+                        found = True
+                        break
+                
+                if not found:
+                    return {
+                        'success': False, 
+                        'error': f'Required column not found. Need one of: {", ".join(possible_names)}'
+                    }
+            
+            tutors_data = []
+            row_number = 1
+            
+            for row in csv_reader:
+                row_number += 1
+                
+                first_name = row[field_mapping['first_name']].strip()
+                last_name = row[field_mapping['last_name']].strip()
+                email = row[field_mapping['email']].strip().lower()
+                tutor_id = row[field_mapping['tutor_id']].strip().upper()
+                
+                if not all([first_name, last_name, email, tutor_id]):
+                    return {
+                        'success': False,
+                        'error': f'Row {row_number}: All fields are required'
+                    }
+                
+                # Check for duplicates
+                from django.contrib.auth import get_user_model
+                from tutors.models import Tutor
+                User = get_user_model()
+                
+                if User.objects.filter(email=email).exists():
+                    return {
+                        'success': False,
+                        'error': f'Row {row_number}: User with email {email} already exists'
+                    }
+                
+                if Tutor.objects.filter(email_address=email).exists():
+                    return {
+                        'success': False,
+                        'error': f'Row {row_number}: Tutor with email {email} already exists'
+                    }
+                
+                if Tutor.objects.filter(tutor_id=tutor_id).exists():
+                    return {
+                        'success': False,
+                        'error': f'Row {row_number}: Tutor with ID {tutor_id} already exists'
+                    }
+                
+                tutors_data.append({
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'email': email,
+                    'tutor_id': tutor_id
+                })
+            
+            if not tutors_data:
+                return {'success': False, 'error': 'No valid tutor data found'}
+            
+            # Create tokens and send emails
+            with transaction.atomic():
+                tokens_created = []
+                
+                for tutor_data in tutors_data:
+                    token = AccountSetupToken.objects.create(
+                        email=tutor_data['email'],
+                        first_name=tutor_data['first_name'],
+                        last_name=tutor_data['last_name'],
+                        tutor_id=tutor_data['tutor_id']
+                    )
+                    tokens_created.append(token)
+                
+                successful_emails = []
+                failed_emails = []
+                
+                for token in tokens_created:
+                    try:
+                        if send_account_setup_email(token):
+                            successful_emails.append(token.email)
+                        else:
+                            failed_emails.append(token.email)
+                    except Exception:
+                        failed_emails.append(token.email)
+                
+                try:
+                    send_batch_import_summary_email(
+                        admin_email=admin_user.email,
+                        total_count=len(tutors_data),
+                        success_count=len(successful_emails),
+                        failed_emails=failed_emails if failed_emails else None
+                    )
+                except Exception:
+                    pass
+                
+                return {
+                    'success': True,
+                    'total_tutors': len(tutors_data),
+                    'successful_emails': len(successful_emails),
+                    'failed_emails': failed_emails
+                }
+        
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
 
 # Customize admin site for users
 admin.site.site_header = "Quest4Knowledge User Management (ZAR)"

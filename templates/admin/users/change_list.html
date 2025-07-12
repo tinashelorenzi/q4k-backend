@@ -1,0 +1,42 @@
+{% extends "admin/change_list.html" %}
+{% load i18n admin_urls static admin_list %}
+
+{% block object-tools-items %}
+    {% if show_batch_import %}
+        <li>
+            <a href="{{ batch_import_url }}" class="addlink" style="background-color: #28a745; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-weight: bold;">
+                📥 Batch Import Tutors
+            </a>
+        </li>
+        <li>
+            <a href="{{ import_history_url }}" class="addlink" style="background-color: #17a2b8; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-weight: bold;">
+                📋 Import History
+            </a>
+        </li>
+    {% endif %}
+    {{ block.super }}
+{% endblock %}
+
+{% block content %}
+    {% if show_batch_import %}
+        <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; padding: 15px; margin-bottom: 20px;">
+            <h3 style="margin-top: 0; color: #495057;">🚀 Quick Actions</h3>
+            <p style="margin-bottom: 15px; color: #6c757d;">
+                Use these tools to efficiently manage tutor accounts:
+            </p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <a href="{{ batch_import_url }}" style="background-color: #28a745; color: white; padding: 10px 20px; border-radius: 4px; text-decoration: none; font-weight: bold; display: inline-block;">
+                    📥 Batch Import Tutors
+                </a>
+                <a href="{{ import_history_url }}" style="background-color: #17a2b8; color: white; padding: 10px 20px; border-radius: 4px; text-decoration: none; font-weight: bold; display: inline-block;">
+                    📋 View Import History
+                </a>
+            </div>
+            <p style="margin-top: 10px; font-size: 12px; color: #6c757d;">
+                <strong>Batch Import:</strong> Upload a CSV file to create multiple tutor accounts at once.<br>
+                <strong>Import History:</strong> View the status of all batch import operations.
+            </p>
+        </div>
+    {% endif %}
+    {{ block.super }}
+{% endblock %} 

@@ -154,21 +154,27 @@ class Tutor(models.Model):
         self.last_name = self.last_name.strip().title()
     
     def save(self, *args, **kwargs):
-        """
-        Override save method to perform validation and auto-generate tutor_id if needed.
-        """
-        self.clean()
-        
-        # Auto-generate tutor_id if not provided
+        """Override save to auto-generate tutor_id only if not provided."""
         if not self.tutor_id:
-            # First save to get the primary key
-            super().save(*args, **kwargs)
-            # Now generate the tutor_id
-            self.tutor_id = f"TUT-{self.pk:04d}"
-            # Save again with the generated tutor_id
-            super().save(update_fields=['tutor_id'])
-        else:
-            super().save(*args, **kwargs)
+            # Only auto-generate if tutor_id is completely empty
+            # This preserves tutor_ids from batch import
+            last_tutor = Tutor.objects.filter(
+                tutor_id__startswith='TUT-'
+            ).order_by('tutor_id').last()
+            
+            if last_tutor and last_tutor.tutor_id:
+                try:
+                    # Extract number from last tutor ID
+                    last_number = int(last_tutor.tutor_id.split('-')[1])
+                    new_number = last_number + 1
+                except (ValueError, IndexError):
+                    new_number = 1
+            else:
+                new_number = 1
+            
+            self.tutor_id = f"TUT-{new_number:04d}"
+        
+        super().save(*args, **kwargs)
     
     def deactivate(self):
         """

@@ -1,0 +1,180 @@
+{% extends "admin/base_site.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block extrahead %}{{ block.super }}
+<script type="text/javascript" src="{% url 'admin:jsi18n' %}"></script>
+{{ media }}
+{% endblock %}
+
+{% block extrastyle %}{{ block.super }}
+<link rel="stylesheet" type="text/css" href="{% static "admin/css/forms.css" %}">
+<style>
+    .batch-import-container {
+        max-width: 800px;
+        margin: 20px auto;
+        padding: 20px;
+        background: var(--body-bg);
+        color: var(--body-fg);
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.07);
+    }
+    .form-section {
+        margin-bottom: 30px;
+        padding: 20px;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
+        background: var(--header-bg);
+        color: var(--body-fg);
+    }
+    .form-section h3 {
+        margin-top: 0;
+        color: var(--body-fg);
+        border-bottom: 2px solid var(--primary);
+        padding-bottom: 10px;
+    }
+    .csv-upload {
+        border: 2px dashed var(--primary);
+        padding: 20px;
+        text-align: center;
+        border-radius: 6px;
+        background: var(--darkened-bg);
+        color: var(--body-fg);
+        margin: 10px 0;
+    }
+    .csv-textarea {
+        width: 100%;
+        min-height: 200px;
+        font-family: monospace;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 10px;
+        background: var(--body-bg);
+        color: var(--body-fg);
+    }
+    .submit-btn {
+        background: var(--button-bg);
+        color: var(--button-fg);
+        padding: 12px 24px;
+        border: none;
+        border-radius: 4px;
+        font-size: 16px;
+        font-weight: bold;
+        cursor: pointer;
+        transition: background 0.2s;
+    }
+    .submit-btn:hover {
+        background: var(--button-hover-bg);
+    }
+    .help-text {
+        background: var(--darkened-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 15px;
+        margin: 15px 0;
+        color: var(--body-fg);
+    }
+    .example-csv {
+        background: var(--darkened-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        padding: 15px;
+        font-family: monospace;
+        font-size: 12px;
+        overflow-x: auto;
+        color: var(--body-fg);
+    }
+    .message-error {
+        background: var(--error-bg, #f8d7da);
+        border: 1px solid var(--error-border, #f5c6cb);
+        color: var(--error-fg, #721c24);
+    }
+    .message-success {
+        background: var(--success-bg, #d4edda);
+        border: 1px solid var(--success-border, #c3e6cb);
+        color: var(--success-fg, #155724);
+    }
+    .message-warning {
+        background: var(--warning-bg, #fff3cd);
+        border: 1px solid var(--warning-border, #ffeaa7);
+        color: var(--warning-fg, #856404);
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">{% trans 'Home' %}</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='users' %}">Users</a>
+    &rsaquo; <a href="{% url 'admin:users_user_changelist' %}">Users</a>
+    &rsaquo; Batch Import Tutors
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="batch-import-container">
+    <h1>📥 Batch Import Tutors</h1>
+    
+    <div class="help-text">
+        <h3>📋 Instructions</h3>
+        <p>Upload a CSV file or paste CSV content to create multiple tutor accounts at once. The system will:</p>
+        <ul>
+            <li>Validate all required fields</li>
+            <li>Check for duplicate emails and tutor IDs</li>
+            <li>Create account setup tokens</li>
+            <li>Send invitation emails to all tutors</li>
+        </ul>
+    </div>
+
+    <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        
+        <div class="form-section">
+            <h3>📁 Upload CSV File</h3>
+            <div class="csv-upload">
+                <input type="file" name="csv_file" accept=".csv" style="margin-bottom: 10px;">
+                <p style="margin: 0; color: var(--body-fg);">Choose a CSV file to upload</p>
+            </div>
+        </div>
+
+        <div class="form-section">
+            <h3>📝 Or Paste CSV Content</h3>
+            <textarea name="csv_content" class="csv-textarea" placeholder="Paste your CSV content here..."></textarea>
+        </div>
+
+        <div class="form-section">
+            <h3>📊 Required CSV Format</h3>
+            <p>Your CSV must include these columns (headers are case-insensitive):</p>
+            <ul>
+                <li><strong>First Name</strong> - Tutor's first name</li>
+                <li><strong>Last Name</strong> - Tutor's last name</li>
+                <li><strong>Email</strong> - Tutor's email address</li>
+                <li><strong>Tutor ID</strong> - Unique tutor identifier</li>
+            </ul>
+            
+            <div class="example-csv">
+                first_name,last_name,email,tutor_id<br>
+                John,Doe,john.doe@example.com,TUT001<br>
+                Jane,Smith,jane.smith@example.com,TUT002<br>
+                Mike,Johnson,mike.johnson@example.com,TUT003
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <button type="submit" class="submit-btn">
+                🚀 Start Batch Import
+            </button>
+        </div>
+    </form>
+
+    {% if messages %}
+    <div style="margin-top: 20px;">
+        {% for message in messages %}
+        <div style="padding: 10px; margin: 5px 0; border-radius: 4px;" 
+             class="{% if message.tags == 'error' %}message-error{% endif %}{% if message.tags == 'success' %}message-success{% endif %}{% if message.tags == 'warning' %}message-warning{% endif %}">
+            {{ message }}
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
