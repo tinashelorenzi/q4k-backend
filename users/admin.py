@@ -789,7 +789,7 @@ class AccountSetupTokenAdmin(admin.ModelAdmin):
     def setup_link(self, obj):
         """Display the setup link for easy copying."""
         if not obj.is_used and not obj.is_expired():
-            link = f"http://localhost:5173/setup-account?token={obj.token}"
+            link = f"http://tutors.quest4knowledge.co.za/setup-account?token={obj.token}"
             return format_html(
                 '<a href="{}" target="_blank" style="color: blue;">{}</a>',
                 link,

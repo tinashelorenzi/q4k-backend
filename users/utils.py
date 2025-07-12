@@ -23,7 +23,7 @@ def send_account_setup_email(token_obj, frontend_base_url=None):
     try:
         # Use default frontend URL if not provided
         if not frontend_base_url:
-            frontend_base_url = getattr(settings, 'FRONTEND_BASE_URL', 'http://localhost:5173')
+            frontend_base_url = getattr(settings, 'FRONTEND_BASE_URL', 'http://tutors.quest4knowledge.co.za')
         
         # Construct the setup link
         setup_url = f"{frontend_base_url}/setup-account?token={token_obj.token}"
