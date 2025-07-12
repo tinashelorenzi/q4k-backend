@@ -258,7 +258,7 @@ if DEBUG:
     }
 
 EMAIL_HOST = 'mail.quest4knowledge.co.za'
-EMAIL_PORT = 465
-EMAIL_USE_TLS = True
+EMAIL_PORT = 587
+EMAIL_USE_TLS = False
 EMAIL_HOST_USER = 'agent@quest4knowledge.co.za'  # Change this
 EMAIL_HOST_PASSWORD = 'eO4P*}cB6nOgvlO?'

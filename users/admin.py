@@ -757,12 +757,12 @@ class AccountSetupTokenAdmin(admin.ModelAdmin):
         extra_context = extra_context or {}
         extra_context['custom_buttons'] = [
             {
-                'url': reverse('admin:accountsetuptoken_batch_import'),
+                'url': reverse('admin:users_accountsetuptoken_batch_import'),
                 'name': 'Batch Import Tutors',
                 'class': 'addlink',
             },
             {
-                'url': reverse('admin:accountsetuptoken_import_history'),
+                'url': reverse('admin:users_accountsetuptoken_import_history'),
                 'name': 'Import History',
                 'class': 'viewlink',
             }
@@ -824,9 +824,7 @@ class AccountSetupTokenAdmin(admin.ModelAdmin):
         return True
     
     def has_delete_permission(self, request, obj=None):
-        """Allow deletion of expired/used tokens."""
-        if obj:
-            return obj.is_used or obj.is_expired()
+        """Allow deletion of all tokens."""
         return True
     
     # Batch import view
