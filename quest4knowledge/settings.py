@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+import ssl
+import certifi
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -257,8 +259,13 @@ if DEBUG:
         },
     }
 
-EMAIL_HOST = 'mail.quest4knowledge.co.za'
+EMAIL_BACKEND = 'utils.email_backend.SSLEmailBackend'
+EMAIL_HOST = 'smtp-relay.gmail.com'
 EMAIL_PORT = 587
-EMAIL_USE_TLS = False
-EMAIL_HOST_USER = 'agent@quest4knowledge.co.za'  # Change this
-EMAIL_HOST_PASSWORD = 'eO4P*}cB6nOgvlO?'
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'tutors-agent@quest4knowledge.co.za'  # Change this
+EMAIL_HOST_PASSWORD = 'ioox weje xkxj umqp'
+# SSL Configuration
+EMAIL_SSL_CERTFILE = None
+EMAIL_SSL_KEYFILE = None
+EMAIL_USE_SSL = False
