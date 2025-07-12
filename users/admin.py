@@ -372,6 +372,37 @@ class UserAdmin(BaseUserAdmin):
                 'profile_picture',
             )
         }),
+        ('Notification Settings', {
+            'fields': (
+                ('email_notifications', 'sms_notifications'),
+                ('push_notifications', 'marketing_emails'),
+                'login_notifications',
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Preferences', {
+            'fields': (
+                'language_preference',
+                'timezone',
+                ('date_format', 'time_format'),
+                'theme_preference',
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Privacy Settings', {
+            'fields': (
+                'profile_visible',
+                ('show_online_status', 'show_email', 'show_phone'),
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Security Settings', {
+            'fields': (
+                'two_factor_enabled',
+                'session_timeout',
+            ),
+            'classes': ('collapse',)
+        }),
         ('Account Type & Permissions', {
             'fields': (
                 'user_type',
@@ -441,6 +472,8 @@ class UserAdmin(BaseUserAdmin):
         'unlock_selected_accounts',
         'reset_failed_login_attempts',
     ]
+
+
     
     def get_queryset(self, request):
         """Optimize database queries."""

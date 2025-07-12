@@ -99,34 +99,87 @@ class UserSerializer(serializers.ModelSerializer):
     """
     Serializer for User model data.
     """
+
     full_name = serializers.CharField(source='get_full_name', read_only=True)
+    user_type_display = serializers.CharField(source='get_user_type_display', read_only=True)
+    language_display = serializers.CharField(source='get_language_preference_display', read_only=True)
+    theme_display = serializers.CharField(source='get_theme_preference_display', read_only=True)
+    date_format_display = serializers.CharField(source='get_date_format_display', read_only=True)
+    time_format_display = serializers.CharField(source='get_time_format_display', read_only=True)
     
     class Meta:
         model = User
         fields = [
-            'id',
-            'username',
-            'email',
-            'first_name',
-            'last_name',
-            'full_name',
-            'user_type',
-            'phone_number',
-            'profile_picture',
-            'is_verified',
-            'is_approved',
-            'is_active',
-            'date_joined',
-            'last_login',
+            # Basic Info
+            'id', 'username', 'first_name', 'last_name', 'full_name', 'email', 
+            'phone_number', 'profile_picture',
+            
+            # Account Status
+            'user_type', 'user_type_display', 'is_active', 'is_verified', 
+            'is_approved', 'is_staff', 'is_superuser',
+            
+            # Notification Settings
+            'email_notifications', 'sms_notifications', 'push_notifications', 
+            'marketing_emails', 'login_notifications',
+            
+            # Preferences
+            'language_preference', 'language_display', 'timezone', 
+            'date_format', 'date_format_display', 'time_format', 'time_format_display',
+            'theme_preference', 'theme_display',
+            
+            # Privacy Settings
+            'profile_visible', 'show_online_status', 'show_email', 'show_phone',
+            
+            # Security Settings
+            'two_factor_enabled', 'session_timeout',
+            
+            # Timestamps
+            'last_login', 'date_joined', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id',
-            'full_name',
-            'is_verified',
-            'is_approved',
-            'date_joined',
-            'last_login',
+            'id', 'full_name', 'user_type_display', 'language_display', 
+            'theme_display', 'date_format_display', 'time_format_display',
+            'is_staff', 'is_superuser', 'last_login', 'date_joined', 
+            'created_at', 'updated_at'
         ]
+        extra_kwargs = {
+            'email': {'required': True},
+            'password': {'write_only': True},
+        }
+    
+    def validate_email(self, value):
+        """Validate email address."""
+        user = self.instance
+        if user and user.email == value:
+            return value
+            
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email address is already in use.")
+        return value
+    
+    def validate_session_timeout(self, value):
+        """Validate session timeout value."""
+        if value < 0:
+            raise serializers.ValidationError("Session timeout cannot be negative.")
+        if value > 43200:  # 30 days in minutes
+            raise serializers.ValidationError("Session timeout cannot exceed 30 days.")
+        return value
+
+    def update(self, instance, validated_data):
+        """Custom update method to handle password changes."""
+        password = validated_data.pop('password', None)
+        
+        # Update other fields
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        # Handle password separately if provided
+        if password:
+            instance.set_password(password)
+        
+        instance.save()
+        return instance
+
 
 
 class TutorProfileSerializer(serializers.ModelSerializer):
@@ -179,3 +232,60 @@ class LogoutSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Refresh token is required.")
         return value
+
+
+class UserSettingsSerializer(serializers.ModelSerializer):
+    """
+    Serializer specifically for user settings (subset of UserSerializer).
+    Used for the settings endpoints.
+    """
+    language_display = serializers.CharField(source='get_language_preference_display', read_only=True)
+    theme_display = serializers.CharField(source='get_theme_preference_display', read_only=True)
+    date_format_display = serializers.CharField(source='get_date_format_display', read_only=True)
+    time_format_display = serializers.CharField(source='get_time_format_display', read_only=True)
+    
+    class Meta:
+        model = User
+        fields = [
+            # Notification Settings
+            'email_notifications', 'sms_notifications', 'push_notifications', 
+            'marketing_emails', 'login_notifications',
+            
+            # Preferences
+            'language_preference', 'language_display', 'timezone', 
+            'date_format', 'date_format_display', 'time_format', 'time_format_display',
+            'theme_preference', 'theme_display',
+            
+            # Privacy Settings
+            'profile_visible', 'show_online_status', 'show_email', 'show_phone',
+            
+            # Security Settings
+            'two_factor_enabled', 'session_timeout',
+        ]
+
+class UserBasicSerializer(serializers.ModelSerializer):
+    """
+    Basic user serializer for public profile views.
+    Respects privacy settings.
+    """
+    full_name = serializers.CharField(source='get_full_name', read_only=True)
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'full_name', 'profile_picture', 'user_type'
+        ]
+    
+    def to_representation(self, instance):
+        """Custom representation that respects privacy settings."""
+        data = super().to_representation(instance)
+        
+        # Only include email if user allows it
+        if instance.show_email:
+            data['email'] = instance.email
+        
+        # Only include phone if user allows it
+        if instance.show_phone:
+            data['phone_number'] = instance.phone_number
+            
+        return data

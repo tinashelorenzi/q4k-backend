@@ -94,6 +94,106 @@ class User(AbstractUser):
         auto_now=True,
         help_text="Date and time when the user was last updated"
     )
+
+    # Notification Settings
+    email_notifications = models.BooleanField(
+        default=True,
+        help_text='Whether to receive notifications via email'
+    )
+    sms_notifications = models.BooleanField(
+        default=False,
+        help_text='Whether to receive notifications via SMS'
+    )
+    push_notifications = models.BooleanField(
+        default=True,
+        help_text='Whether to receive push notifications'
+    )
+    marketing_emails = models.BooleanField(
+        default=False,
+        help_text='Whether to receive marketing and promotional emails'
+    )
+    
+    # Preference Settings
+    language_preference = models.CharField(
+        max_length=10,
+        default='en',
+        choices=[
+            ('en', 'English'),
+            ('af', 'Afrikaans'),
+            ('zu', 'Zulu'),
+            ('xh', 'Xhosa'),
+        ],
+        help_text='Preferred language for the interface'
+    )
+    timezone = models.CharField(
+        max_length=50,
+        default='Africa/Johannesburg',
+        help_text='User timezone preference'
+    )
+    date_format = models.CharField(
+        max_length=20,
+        default='YYYY-MM-DD',
+        choices=[
+            ('YYYY-MM-DD', 'YYYY-MM-DD (2024-12-31)'),
+            ('DD/MM/YYYY', 'DD/MM/YYYY (31/12/2024)'),
+            ('MM/DD/YYYY', 'MM/DD/YYYY (12/31/2024)'),
+            ('DD-MM-YYYY', 'DD-MM-YYYY (31-12-2024)'),
+        ],
+        help_text='Preferred date display format'
+    )
+    time_format = models.CharField(
+        max_length=10,
+        default='24h',
+        choices=[
+            ('24h', '24 Hour (14:30)'),
+            ('12h', '12 Hour (2:30 PM)'),
+        ],
+        help_text='Preferred time display format'
+    )
+    
+    # Privacy Settings
+    profile_visible = models.BooleanField(
+        default=True,
+        help_text='Whether profile is visible to other users'
+    )
+    show_online_status = models.BooleanField(
+        default=True,
+        help_text='Whether to show online status to other users'
+    )
+    show_email = models.BooleanField(
+        default=False,
+        help_text='Whether to show email address in profile'
+    )
+    show_phone = models.BooleanField(
+        default=False,
+        help_text='Whether to show phone number in profile'
+    )
+    
+    # Security Settings
+    two_factor_enabled = models.BooleanField(
+        default=False,
+        help_text='Whether two-factor authentication is enabled'
+    )
+    login_notifications = models.BooleanField(
+        default=True,
+        help_text='Whether to receive notifications on new logins'
+    )
+    session_timeout = models.PositiveIntegerField(
+        default=1440,  # 24 hours in minutes
+        help_text='Session timeout in minutes (0 = never expire)'
+    )
+    
+    # Additional fields for settings
+    theme_preference = models.CharField(
+        max_length=10,
+        default='light',
+        choices=[
+            ('light', 'Light Theme'),
+            ('dark', 'Dark Theme'),
+            ('auto', 'Auto (System)'),
+        ],
+        help_text='Preferred theme for the interface'
+    )
     
     class Meta:
         db_table = 'users'
