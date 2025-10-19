@@ -63,10 +63,25 @@ def get_tokens_for_user(user):
 def login_view(request):
     """
     API endpoint for user login with email and password.
+    Validates Turnstile token to prevent bot access.
     
     Returns JWT tokens and user information upon successful authentication.
     """
+    from utils.turnstile import verify_turnstile_token
+    
     try:
+        # Verify Turnstile token
+        turnstile_token = request.data.get('turnstile_token')
+        client_ip = get_client_ip(request)
+        
+        is_valid, error_message = verify_turnstile_token(turnstile_token, client_ip)
+        if not is_valid:
+            logger.warning(f"Turnstile verification failed for login attempt from {client_ip}: {error_message}")
+            return Response({
+                'error': 'Verification failed',
+                'detail': error_message or 'Please complete the verification'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         serializer = LoginSerializer(data=request.data, context={'request': request})
         
         if serializer.is_valid():
@@ -1101,10 +1116,24 @@ def request_password_reset(request):
     """
     Request a password reset link.
     Rate limited to 3 requests per day per user.
+    Validates Turnstile token to prevent bot abuse.
     """
     from .models import PasswordResetToken
+    from utils.turnstile import verify_turnstile_token
     
     try:
+        # Verify Turnstile token
+        turnstile_token = request.data.get('turnstile_token')
+        client_ip = get_client_ip(request)
+        
+        is_valid, error_message = verify_turnstile_token(turnstile_token, client_ip)
+        if not is_valid:
+            logger.warning(f"Turnstile verification failed for password reset request from {client_ip}: {error_message}")
+            return Response({
+                'error': 'Verification failed',
+                'detail': error_message or 'Please complete the verification'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
         email = request.data.get('email', '').strip().lower()
         
         if not email:

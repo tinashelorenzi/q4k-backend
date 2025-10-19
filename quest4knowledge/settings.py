@@ -293,3 +293,6 @@ FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5174')
 DIGITAL_SAMBA_TEAM_ID = os.getenv('DIGITAL_SAMBA_TEAM_ID')
 DIGITAL_SAMBA_DEVELOPER_KEY = os.getenv('DIGITAL_SAMBA_DEVELOPER_KEY')
 DIGITAL_SAMBA_API_URL = os.getenv('DIGITAL_SAMBA_API_URL', 'https://api.digitalsamba.com/api/v1')
+
+# Cloudflare Turnstile
+TURNSTILE_SECRET_KEY = os.getenv('TURNSTILE_SECRET_KEY', '')

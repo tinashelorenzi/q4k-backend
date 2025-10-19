@@ -17,6 +17,7 @@ PyJWT==2.9.0
 PyMySQL==1.1.2
 pyOpenSSL==25.1.0
 python-dotenv==1.0.1
+requests==2.32.3
 setuptools==80.9.0
 sqlparse==0.5.3
 urllib3==2.5.0
