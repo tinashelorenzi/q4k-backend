@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Session Verification Confirmation</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .session-details {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #8b5cf6;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        .detail-value {
+            color: #212529;
+        }
+        .status-badge {
+            display: inline-block;
+            background: #10b981;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .remuneration-highlight {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .remuneration-highlight h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+        .remuneration-amount {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 0;
+        }
+        .notes-section {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .notes-section h4 {
+            margin: 0 0 10px 0;
+            color: #856404;
+            font-size: 16px;
+        }
+        .notes-content {
+            color: #856404;
+            font-style: italic;
+        }
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 12px 30px;
+            text-decoration: none;
+            border-radius: 25px;
+            font-weight: 600;
+            margin: 20px 0;
+            transition: transform 0.2s;
+        }
+        .cta-button:hover {
+            transform: translateY(-2px);
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        .footer p {
+            margin: 5px 0;
+        }
+        .social-links {
+            margin: 15px 0;
+        }
+        .social-links a {
+            color: #8b5cf6;
+            text-decoration: none;
+            margin: 0 10px;
+        }
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            .header, .content {
+                padding: 20px;
+            }
+            .detail-row {
+                flex-direction: column;
+            }
+            .detail-label {
+                margin-bottom: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 Session Verified!</h1>
+            <p>Your tutoring session has been approved and verified</p>
+        </div>
+        
+        <div class="content">
+            <h2>Hello {{ tutor.full_name }},</h2>
+            
+            <p>Great news! Your tutoring session has been successfully verified and approved by our admin team.</p>
+            
+            <div class="session-details">
+                <h3 style="margin-top: 0; color: #8b5cf6;">Session Details</h3>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Session ID:</span>
+                    <span class="detail-value">{{ session.session_id }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Subject:</span>
+                    <span class="detail-value">{{ gig.subject_name }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Client:</span>
+                    <span class="detail-value">{{ gig.client_name }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Date:</span>
+                    <span class="detail-value">{{ session.session_date }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Time:</span>
+                    <span class="detail-value">{{ session.duration_display }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Hours Logged:</span>
+                    <span class="detail-value">{{ session.hours_logged }} hours</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Status:</span>
+                    <span class="detail-value">
+                        <span class="status-badge">✅ Verified</span>
+                    </span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Verified By:</span>
+                    <span class="detail-value">{{ session.verified_by_name }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Verified At:</span>
+                    <span class="detail-value">{{ session.verified_at|date:"F j, Y \a\t g:i A" }}</span>
+                </div>
+            </div>
+            
+            {% if session.session_notes %}
+            <div class="notes-section">
+                <h4>📝 Session Notes</h4>
+                <div class="notes-content">{{ session.session_notes }}</div>
+            </div>
+            {% endif %}
+            
+            {% if verification_notes %}
+            <div class="notes-section">
+                <h4>💬 Admin Notes</h4>
+                <div class="notes-content">{{ verification_notes }}</div>
+            </div>
+            {% endif %}
+            
+            <div class="remuneration-highlight">
+                <h3>💰 Remuneration Earned</h3>
+                <p class="remuneration-amount">R{{ session_remuneration|floatformat:2 }}</p>
+                <p style="margin: 10px 0 0 0; opacity: 0.9;">
+                    This amount will be processed according to your payment schedule.
+                </p>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{{ frontend_url }}/dashboard" class="cta-button">
+                    View Your Dashboard
+                </a>
+            </div>
+            
+            <p>Thank you for your excellent work! Your dedication to helping students succeed is truly appreciated.</p>
+            
+            <p>If you have any questions about this session or your remuneration, please don't hesitate to contact us.</p>
+        </div>
+        
+        <div class="footer">
+            <p><strong>Quest4Knowledge</strong></p>
+            <p>Empowering Education Through Quality Tutoring</p>
+            <div class="social-links">
+                <a href="mailto:{{ default_from_email }}">Contact Support</a>
+                <a href="{{ frontend_url }}">Visit Website</a>
+            </div>
+            <p style="margin-top: 20px; font-size: 12px; color: #adb5bd;">
+                © {{ current_year }} Quest4Knowledge. All rights reserved.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

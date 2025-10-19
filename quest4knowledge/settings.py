@@ -14,6 +14,15 @@ from pathlib import Path
 from datetime import timedelta
 import ssl
 import certifi
+import os
+import dotenv
+
+# Load environment variables
+dotenv.load_dotenv()
+
+# Configure PyMySQL to work as MySQLdb replacement
+import pymysql
+pymysql.install_as_MySQLdb()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,12 +32,13 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-8#0r+hr^-&dc1dkko_6mk(hsuv*4i*pu+yk^cqc36no#s&$j)-'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-8#0r+hr^-&dc1dkko_6mk(hsuv*4i*pu+yk^cqc36no#s&$j)-')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1,0.0.0.0').split(',')
+ALLOWED_HOSTS = [host.strip() for host in ALLOWED_HOSTS if host.strip()]
 
 
 # Application definition
@@ -90,8 +100,12 @@ WSGI_APPLICATION = 'quest4knowledge.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': os.getenv('DB_ENGINE'),
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST'),
+        'PORT': os.getenv('DB_PORT'),
     }
 }
 
@@ -259,13 +273,23 @@ if DEBUG:
         },
     }
 
-EMAIL_BACKEND = 'utils.email_backend.SSLEmailBackend'
-EMAIL_HOST = 'smtp-relay.gmail.com'
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'tutors-agent@quest4knowledge.co.za'  # Change this
-EMAIL_HOST_PASSWORD = 'ioox weje xkxj umqp'
+# Email Configuration
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'utils.email_backend.SSLEmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp-relay.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower() == 'true'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
 # SSL Configuration
-EMAIL_SSL_CERTFILE = None
-EMAIL_SSL_KEYFILE = None
-EMAIL_USE_SSL = False
+EMAIL_SSL_CERTFILE = os.getenv('EMAIL_SSL_CERTFILE', None)
+EMAIL_SSL_KEYFILE = os.getenv('EMAIL_SSL_KEYFILE', None)
+
+# Frontend URL for email templates
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:5174')
+
+# Digital Samba Configuration
+DIGITAL_SAMBA_TEAM_ID = os.getenv('DIGITAL_SAMBA_TEAM_ID')
+DIGITAL_SAMBA_DEVELOPER_KEY = os.getenv('DIGITAL_SAMBA_DEVELOPER_KEY')
+DIGITAL_SAMBA_API_URL = os.getenv('DIGITAL_SAMBA_API_URL', 'https://api.digitalsamba.com/api/v1')

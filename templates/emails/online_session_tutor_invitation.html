@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Session Invitation</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 16px;
+        }
+        .content {
+            padding: 30px;
+        }
+        .meeting-code-box {
+            background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+            color: white;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            margin: 25px 0;
+        }
+        .meeting-code {
+            font-size: 32px;
+            font-weight: 700;
+            letter-spacing: 4px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+        }
+        .pin-code {
+            font-size: 28px;
+            font-weight: 700;
+            margin: 10px 0;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 10px 20px;
+            border-radius: 8px;
+            display: inline-block;
+        }
+        .session-details {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #8b5cf6;
+        }
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 10px 0;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+        }
+        .detail-value {
+            color: #212529;
+            text-align: right;
+        }
+        .cta-button {
+            display: inline-block;
+            background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+            color: white;
+            padding: 15px 40px;
+            text-decoration: none;
+            border-radius: 25px;
+            font-weight: 600;
+            font-size: 16px;
+            margin: 20px 0;
+            transition: transform 0.2s;
+        }
+        .cta-button:hover {
+            transform: translateY(-2px);
+        }
+        .important-note {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .important-note h4 {
+            margin: 0 0 10px 0;
+            color: #856404;
+            font-size: 16px;
+        }
+        .footer {
+            background: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            color: #6c757d;
+            font-size: 14px;
+        }
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            .header, .content {
+                padding: 20px;
+            }
+            .meeting-code {
+                font-size: 24px;
+                letter-spacing: 2px;
+            }
+            .detail-row {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎓 Digital Samba Session Scheduled!</h1>
+            <p>You have a virtual tutoring session coming up</p>
+        </div>
+        
+        <div class="content">
+            <h2>Hello {{ tutor.full_name }},</h2>
+            
+            <p>An online tutoring session has been scheduled for you. Here are your meeting access details:</p>
+            
+            <div class="meeting-code-box">
+                <p style="margin: 0; font-size: 14px; opacity: 0.9;">Meeting Code</p>
+                <div class="meeting-code">{{ session.meeting_code }}</div>
+                <p style="margin: 15px 0 5px 0; font-size: 14px; opacity: 0.9;">PIN Code</p>
+                <div class="pin-code">{{ session.pin_code }}</div>
+            </div>
+            
+            <div class="session-details">
+                <h3 style="margin-top: 0; color: #8b5cf6;">Session Details</h3>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Subject:</span>
+                    <span class="detail-value">{{ gig.subject_name }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Client:</span>
+                    <span class="detail-value">{{ gig.client_name }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Date & Time:</span>
+                    <span class="detail-value">{{ session.scheduled_start|date:"F j, Y \a\t g:i A" }}</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Duration:</span>
+                    <span class="detail-value">{{ session.duration_minutes }} minutes</span>
+                </div>
+                
+                <div class="detail-row">
+                    <span class="detail-label">Session ID:</span>
+                    <span class="detail-value">{{ session.session_id }}</span>
+                </div>
+            </div>
+            
+            {% if session.session_notes %}
+            <div class="important-note">
+                <h4>📝 Session Notes</h4>
+                <p style="margin: 0; color: #856404;">{{ session.session_notes }}</p>
+            </div>
+            {% endif %}
+            
+            <div class="important-note">
+                <h4>ℹ️ How to Join</h4>
+                <ol style="margin: 10px 0 0 20px; padding: 0; color: #856404;">
+                    <li>Click the "Join Meeting" button below</li>
+                    <li>Enter the meeting code: <strong>{{ session.meeting_code }}</strong></li>
+                    <li>Enter the PIN code: <strong>{{ session.pin_code }}</strong></li>
+                    <li>Select "Tutor" as your role</li>
+                    <li>You'll be connected to the video session</li>
+                </ol>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <a href="{{ session.tutor_meeting_url }}" class="cta-button">
+                    Join Meeting
+                </a>
+            </div>
+            
+            <div class="important-note">
+                <h4>💡 Important Information</h4>
+                <ul style="margin: 10px 0 0 20px; padding: 0; color: #856404;">
+                    <li>Join a few minutes early to test your audio and video</li>
+                    <li>The client will receive separate login details</li>
+                    <li>You can extend the session if needed during the meeting</li>
+                    <li>The session will automatically end at the scheduled time</li>
+                </ul>
+            </div>
+            
+            <h3>Client Contact Information</h3>
+            <div class="session-details">
+                <div class="detail-row">
+                    <span class="detail-label">Name:</span>
+                    <span class="detail-value">{{ gig.client_name }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Email:</span>
+                    <span class="detail-value">{{ gig.client_email }}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Phone:</span>
+                    <span class="detail-value">{{ gig.client_phone }}</span>
+                </div>
+            </div>
+            
+            <p>If you have any technical issues, please contact support immediately.</p>
+        </div>
+        
+        <div class="footer">
+            <p><strong>Quest4Knowledge</strong></p>
+            <p>Empowering Education Through Quality Tutoring</p>
+            <p style="margin-top: 20px; font-size: 12px; color: #adb5bd;">
+                © {{ current_year }} Quest4Knowledge. All rights reserved.
+            </p>
+        </div>
+    </div>
+</body>
+</html>

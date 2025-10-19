@@ -8,7 +8,7 @@ from django.shortcuts import redirect, get_object_or_404
 from django.contrib import messages
 from django.http import HttpResponseRedirect
 from django.urls import path
-from .models import Gig, GigSession
+from .models import Gig, GigSession, OnlineSession
 
 
 def format_zar_currency(amount):
@@ -659,6 +659,166 @@ class GigAdmin(admin.ModelAdmin):
 
 # Need to import models for the queryset annotation
 from django.db import models
+
+
+@admin.register(OnlineSession)
+class OnlineSessionAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for the OnlineSession model.
+    """
+    
+    list_display = (
+        'session_id_display',
+        'gig_link',
+        'tutor_link',
+        'meeting_code',
+        'scheduled_start',
+        'duration_display',
+        'status_display',
+        'participants_display',
+    )
+    
+    list_filter = (
+        'status',
+        'scheduled_start',
+        'tutor',
+        'tutor_joined',
+        'client_joined',
+    )
+    
+    search_fields = (
+        'meeting_code',
+        'pin_code',
+        'gig__title',
+        'gig__subject_name',
+        'tutor__first_name',
+        'tutor__last_name',
+        'gig__client_name',
+    )
+    
+    readonly_fields = (
+        'meeting_code',
+        'pin_code',
+        'room_name',
+        'actual_start',
+        'actual_end',
+        'tutor_joined',
+        'client_joined',
+        'tutor_joined_at',
+        'client_joined_at',
+        'created_at',
+        'updated_at',
+        'jitsi_url_display',
+        'meeting_url_display',
+    )
+    
+    fieldsets = (
+        ('Session Information', {
+            'fields': (
+                ('gig', 'tutor'),
+                ('scheduled_start', 'scheduled_end'),
+                'extended_end',
+                'session_notes',
+            )
+        }),
+        ('Meeting Access', {
+            'fields': (
+                'meeting_code',
+                'pin_code',
+                'room_name',
+                'jitsi_url_display',
+                'meeting_url_display',
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Session Status', {
+            'fields': (
+                'status',
+                ('actual_start', 'actual_end'),
+            )
+        }),
+        ('Participant Tracking', {
+            'fields': (
+                ('tutor_joined', 'tutor_joined_at'),
+                ('client_joined', 'client_joined_at'),
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': (
+                'created_at',
+                'updated_at',
+                'created_by',
+            ),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def session_id_display(self, obj):
+        """Display session ID."""
+        return obj.session_id
+    session_id_display.short_description = 'Session ID'
+    
+    def gig_link(self, obj):
+        """Display gig with link."""
+        url = reverse('admin:gigs_gig_change', args=[obj.gig.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.gig.gig_id)
+    gig_link.short_description = 'Gig'
+    
+    def tutor_link(self, obj):
+        """Display tutor with link."""
+        if obj.tutor:
+            url = reverse('admin:tutors_tutor_change', args=[obj.tutor.pk])
+            return format_html('<a href="{}">{}</a>', url, obj.tutor.full_name)
+        return "—"
+    tutor_link.short_description = 'Tutor'
+    
+    def duration_display(self, obj):
+        """Display session duration."""
+        return f"{obj.duration_minutes} min"
+    duration_display.short_description = 'Duration'
+    
+    def status_display(self, obj):
+        """Display status with color coding."""
+        status_colors = {
+            'scheduled': 'blue',
+            'active': 'green',
+            'completed': 'gray',
+            'cancelled': 'red',
+        }
+        color = status_colors.get(obj.status, 'black')
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color, obj.get_status_display()
+        )
+    status_display.short_description = 'Status'
+    
+    def participants_display(self, obj):
+        """Display participant join status."""
+        tutor_status = '✓' if obj.tutor_joined else '✗'
+        client_status = '✓' if obj.client_joined else '✗'
+        return format_html(
+            'Tutor: {} | Client: {}',
+            tutor_status, client_status
+        )
+    participants_display.short_description = 'Participants'
+    
+    def jitsi_url_display(self, obj):
+        """Display clickable Jitsi URL."""
+        return format_html(
+            '<a href="{}" target="_blank">{}</a>',
+            obj.jitsi_url, obj.jitsi_url
+        )
+    jitsi_url_display.short_description = 'Jitsi URL'
+    
+    def meeting_url_display(self, obj):
+        """Display clickable meeting URL."""
+        return format_html(
+            '<a href="{}" target="_blank">{}</a>',
+            obj.meeting_url, obj.meeting_url
+        )
+    meeting_url_display.short_description = 'Meeting URL'
+
 
 # Customize admin site for gigs
 admin.site.site_header = "Quest4Knowledge Gig Management (ZAR)"

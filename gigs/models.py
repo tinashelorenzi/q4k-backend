@@ -482,3 +482,305 @@ class GigSession(models.Model):
             self.save()
             return True
         return False
+
+
+class OnlineSession(models.Model):
+    """
+    Model to track online tutoring sessions using Jitsi Meet.
+    Created by admins to facilitate virtual tutoring sessions.
+    """
+    
+    STATUS_CHOICES = [
+        ('scheduled', 'Scheduled'),
+        ('active', 'Active'),
+        ('completed', 'Completed'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    gig = models.ForeignKey(
+        Gig,
+        on_delete=models.CASCADE,
+        related_name='online_sessions',
+        help_text="Associated gig"
+    )
+    
+    tutor = models.ForeignKey(
+        'tutors.Tutor',
+        on_delete=models.CASCADE,
+        related_name='online_sessions',
+        help_text="Tutor conducting the session"
+    )
+    
+    meeting_code = models.CharField(
+        max_length=15,
+        unique=True,
+        db_index=True,
+        help_text="Unique code for accessing the meeting"
+    )
+    
+    pin_code = models.CharField(
+        max_length=6,
+        help_text="6-digit PIN for additional security"
+    )
+    
+    room_name = models.CharField(
+        max_length=255,
+        help_text="Digital Samba room name/ID"
+    )
+    
+    digital_samba_room_id = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Digital Samba room ID"
+    )
+    
+    digital_samba_room_url = models.URLField(
+        blank=True,
+        null=True,
+        help_text="Digital Samba room URL"
+    )
+    
+    scheduled_start = models.DateTimeField(
+        help_text="Scheduled start time of the session"
+    )
+    
+    scheduled_end = models.DateTimeField(
+        help_text="Scheduled end time of the session"
+    )
+    
+    actual_start = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Actual start time (when first participant joins)"
+    )
+    
+    actual_end = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Actual end time (when session is manually ended or auto-completed)"
+    )
+    
+    extended_end = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Extended end time if session was extended"
+    )
+    
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='scheduled',
+        help_text="Current status of the online session"
+    )
+    
+    session_notes = models.TextField(
+        blank=True,
+        help_text="Notes about the session"
+    )
+    
+    tutor_joined = models.BooleanField(
+        default=False,
+        help_text="Whether tutor has joined the session"
+    )
+    
+    client_joined = models.BooleanField(
+        default=False,
+        help_text="Whether client has joined the session"
+    )
+    
+    tutor_joined_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When tutor joined"
+    )
+    
+    client_joined_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When client joined"
+    )
+    
+    created_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='created_online_sessions',
+        help_text="Admin who created this session"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        db_table = 'online_sessions'
+        ordering = ['-scheduled_start']
+        verbose_name = 'Online Session'
+        verbose_name_plural = 'Online Sessions'
+        indexes = [
+            models.Index(fields=['meeting_code']),
+            models.Index(fields=['status', 'scheduled_start']),
+            models.Index(fields=['gig', 'scheduled_start']),
+        ]
+    
+    def __str__(self):
+        return f"{self.session_id} - {self.gig.subject_name} ({self.scheduled_start.strftime('%Y-%m-%d %H:%M')})"
+    
+    @property
+    def session_id(self):
+        """Get formatted session ID."""
+        return f"ONLINE-{self.pk:04d}" if self.pk else "ONLINE-XXXX"
+    
+    @property
+    def digital_samba_url(self):
+        """Get the full Digital Samba room URL."""
+        if self.digital_samba_room_url:
+            return self.digital_samba_room_url
+        
+        # Fallback to constructed URL if room_url is not available
+        from django.conf import settings
+        team_name = settings.DIGITAL_SAMBA_TEAM_ID.split('-')[0] if '-' in settings.DIGITAL_SAMBA_TEAM_ID else settings.DIGITAL_SAMBA_TEAM_ID
+        return f"https://{team_name}.digitalsamba.com/{self.room_name}"
+    
+    @property
+    def meeting_url(self):
+        """Get the frontend meeting room URL."""
+        from django.conf import settings
+        return f"{settings.FRONTEND_URL}/meeting/{self.meeting_code}"
+    
+    @property
+    def tutor_meeting_url(self):
+        """Get the frontend meeting room URL for tutor."""
+        from django.conf import settings
+        return f"{settings.FRONTEND_URL}/meeting/{self.meeting_code}?role=tutor"
+    
+    @property
+    def client_meeting_url(self):
+        """Get the frontend meeting room URL for client."""
+        from django.conf import settings
+        return f"{settings.FRONTEND_URL}/meeting/{self.meeting_code}?role=client"
+    
+    @property
+    def duration_minutes(self):
+        """Get scheduled duration in minutes."""
+        if self.extended_end:
+            delta = self.extended_end - self.scheduled_start
+        else:
+            delta = self.scheduled_end - self.scheduled_start
+        return int(delta.total_seconds() / 60)
+    
+    @property
+    def is_ongoing(self):
+        """Check if session is currently ongoing."""
+        now = timezone.now()
+        end_time = self.extended_end or self.scheduled_end
+        return self.status == 'active' and self.scheduled_start <= now <= end_time
+    
+    @property
+    def time_remaining_minutes(self):
+        """Get remaining time in minutes."""
+        if not self.is_ongoing:
+            return 0
+        end_time = self.extended_end or self.scheduled_end
+        delta = end_time - timezone.now()
+        return max(0, int(delta.total_seconds() / 60))
+    
+    def save(self, *args, **kwargs):
+        """Override save to generate codes if not provided and create Digital Samba room."""
+        is_new = self.pk is None
+        
+        if not self.meeting_code:
+            self.meeting_code = self.generate_meeting_code()
+        if not self.pin_code:
+            self.pin_code = self.generate_pin_code()
+        if not self.room_name:
+            self.room_name = f"Q4K-{self.meeting_code}"
+        
+        super().save(*args, **kwargs)
+        
+        # Create Digital Samba room for new sessions
+        if is_new:
+            self.create_digital_samba_room()
+    
+    def create_digital_samba_room(self):
+        """Create a Digital Samba room for this session."""
+        try:
+            from .digital_samba import DigitalSambaAPI
+            api = DigitalSambaAPI()
+            
+            # Create room with basic settings (let Digital Samba auto-generate friendly_url)
+            response = api.create_room(
+                privacy="public"
+            )
+            
+            # Store the Digital Samba room data
+            self.digital_samba_room_id = response.get('id')
+            self.digital_samba_room_url = response.get('room_url')
+            self.save(update_fields=['digital_samba_room_id', 'digital_samba_room_url'])
+            
+            print(f"Digital Samba room created: {self.digital_samba_room_id}")
+            print(f"Room URL: {self.digital_samba_room_url}")
+            
+        except Exception as e:
+            print(f"Failed to create Digital Samba room: {e}")
+            # Don't raise exception to avoid breaking session creation
+    
+    @staticmethod
+    def generate_meeting_code():
+        """Generate a unique 12-character meeting code."""
+        import secrets
+        import string
+        while True:
+            code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(12))
+            # Format as XXX-XXX-XXX-XXX
+            formatted_code = '-'.join([code[i:i+3] for i in range(0, 12, 3)])
+            if not OnlineSession.objects.filter(meeting_code=formatted_code).exists():
+                return formatted_code
+    
+    @staticmethod
+    def generate_pin_code():
+        """Generate a 6-digit PIN code."""
+        import secrets
+        return ''.join(secrets.choice('0123456789') for _ in range(6))
+    
+    def extend_session(self, additional_minutes):
+        """Extend the session by additional minutes."""
+        if self.extended_end:
+            self.extended_end += timezone.timedelta(minutes=additional_minutes)
+        else:
+            self.extended_end = self.scheduled_end + timezone.timedelta(minutes=additional_minutes)
+        self.save()
+    
+    def mark_joined(self, participant_type):
+        """Mark a participant as joined."""
+        now = timezone.now()
+        if participant_type == 'tutor':
+            self.tutor_joined = True
+            if not self.tutor_joined_at:
+                self.tutor_joined_at = now
+        elif participant_type == 'client':
+            self.client_joined = True
+            if not self.client_joined_at:
+                self.client_joined_at = now
+        
+        # Mark session as active if not already
+        if self.status == 'scheduled':
+            self.status = 'active'
+            if not self.actual_start:
+                self.actual_start = now
+        
+        self.save()
+    
+    def complete_session(self):
+        """Mark session as completed."""
+        if self.status != 'completed':
+            self.status = 'completed'
+            if not self.actual_end:
+                self.actual_end = timezone.now()
+            self.save()
+    
+    def cancel_session(self):
+        """Cancel the session."""
+        if self.status not in ['completed', 'cancelled']:
+            self.status = 'cancelled'
+            self.save()

@@ -763,3 +763,329 @@ def batch_import_history(request):
             'has_previous': page_obj.has_previous(),
         }
     })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def users_list(request):
+    """
+    List all users (admin/manager/staff only).
+    """
+    try:
+        # Check if user has permission to view all users
+        if not (request.user.is_admin or request.user.is_staff or request.user.user_type in ['admin', 'manager', 'staff']):
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators and staff can view all users.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get all users
+        queryset = User.objects.all().order_by('-created_at')
+        
+        # Apply filters
+        user_type = request.GET.get('user_type')
+        if user_type:
+            queryset = queryset.filter(user_type=user_type)
+        
+        is_active = request.GET.get('is_active')
+        if is_active is not None:
+            queryset = queryset.filter(is_active=is_active.lower() == 'true')
+        
+        is_verified = request.GET.get('is_verified')
+        if is_verified is not None:
+            queryset = queryset.filter(is_verified=is_verified.lower() == 'true')
+        
+        search = request.GET.get('search', '')
+        if search:
+            from django.db.models import Q
+            queryset = queryset.filter(
+                Q(username__icontains=search) |
+                Q(email__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search)
+            )
+        
+        # Serialize users
+        serializer = UserSerializer(queryset, many=True)
+        
+        return Response({
+            'results': serializer.data,
+            'count': queryset.count()
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in users_list: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_tutor_user(request):
+    """
+    Create a new tutor user and send account setup email.
+    Similar to batch import but for single user.
+    
+    Expects:
+    {
+        "first_name": "John",
+        "last_name": "Doe",
+        "email": "john@example.com",
+        "tutor_id": "TUT-0123",  // optional, will auto-generate if not provided
+        "phone_number": "+27123456789",  // optional
+        "physical_address": "123 Main St"  // optional
+    }
+    """
+    try:
+        # Check permissions
+        if not request.user.user_type in ['admin', 'manager']:
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators and managers can create users.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Validate required fields
+        first_name = request.data.get('first_name', '').strip()
+        last_name = request.data.get('last_name', '').strip()
+        email = request.data.get('email', '').strip().lower()
+        tutor_id = request.data.get('tutor_id', '').strip().upper()
+        phone_number = request.data.get('phone_number', '').strip()
+        physical_address = request.data.get('physical_address', '').strip()
+        
+        if not all([first_name, last_name, email]):
+            return Response({
+                'error': 'Missing required fields',
+                'detail': 'first_name, last_name, and email are required.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check for existing user
+        if User.objects.filter(email=email).exists():
+            return Response({
+                'error': 'User already exists',
+                'detail': f'A user with email {email} already exists.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check for existing tutor with same email
+        from tutors.models import Tutor
+        if Tutor.objects.filter(email_address=email).exists():
+            return Response({
+                'error': 'Tutor already exists',
+                'detail': f'A tutor with email {email} already exists.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check tutor_id uniqueness if provided
+        if tutor_id and Tutor.objects.filter(tutor_id=tutor_id).exists():
+            return Response({
+                'error': 'Tutor ID already exists',
+                'detail': f'Tutor ID {tutor_id} is already in use.'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Create account setup token
+        token = AccountSetupToken.objects.create(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            tutor_id=tutor_id if tutor_id else None
+        )
+        
+        # Send setup email
+        from .utils import send_account_setup_email
+        email_sent = False
+        try:
+            email_sent = send_account_setup_email(token)
+        except Exception as e:
+            logger.error(f"Error sending setup email to {email}: {str(e)}")
+        
+        logger.info(f"Tutor user created by {request.user.email}: {email}")
+        
+        return Response({
+            'message': 'Tutor created successfully',
+            'email_sent': email_sent,
+            'token': {
+                'email': token.email,
+                'first_name': token.first_name,
+                'last_name': token.last_name,
+                'tutor_id': token.tutor_id,
+                'expires_at': token.expires_at,
+            }
+        }, status=status.HTTP_201_CREATED)
+    
+    except Exception as e:
+        logger.error(f"Error in create_tutor_user: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def update_user(request, user_id):
+    """
+    Update user information (admin/manager only).
+    """
+    try:
+        # Check permissions
+        if not request.user.user_type in ['admin', 'manager', 'staff']:
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators and staff can update users.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        user = User.objects.get(pk=user_id)
+        
+        # Update allowed fields
+        allowed_fields = ['first_name', 'last_name', 'phone_number', 'is_active', 'is_verified', 'is_approved', 'user_type']
+        
+        for field in allowed_fields:
+            if field in request.data:
+                setattr(user, field, request.data[field])
+        
+        user.save()
+        
+        logger.info(f"User {user.email} updated by {request.user.email}")
+        
+        serializer = UserSerializer(user)
+        return Response({
+            'message': 'User updated successfully',
+            'user': serializer.data
+        })
+    
+    except User.DoesNotExist:
+        return Response({
+            'error': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error in update_user: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def deactivate_user(request, user_id):
+    """
+    Deactivate a user account (admin/manager only).
+    """
+    try:
+        # Check permissions
+        if not request.user.user_type in ['admin', 'manager']:
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators and managers can deactivate users.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        user = User.objects.get(pk=user_id)
+        
+        # Prevent deactivating yourself
+        if user.id == request.user.id:
+            return Response({
+                'error': 'Cannot deactivate your own account'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.is_active = False
+        user.save()
+        
+        logger.info(f"User {user.email} deactivated by {request.user.email}")
+        
+        serializer = UserSerializer(user)
+        return Response({
+            'message': 'User deactivated successfully',
+            'user': serializer.data
+        })
+    
+    except User.DoesNotExist:
+        return Response({
+            'error': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error in deactivate_user: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def activate_user(request, user_id):
+    """
+    Activate a user account (admin/manager only).
+    """
+    try:
+        # Check permissions
+        if not request.user.user_type in ['admin', 'manager']:
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators and managers can activate users.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        user = User.objects.get(pk=user_id)
+        user.is_active = True
+        user.save()
+        
+        logger.info(f"User {user.email} activated by {request.user.email}")
+        
+        serializer = UserSerializer(user)
+        return Response({
+            'message': 'User activated successfully',
+            'user': serializer.data
+        })
+    
+    except User.DoesNotExist:
+        return Response({
+            'error': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error in activate_user: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_user(request, user_id):
+    """
+    Delete a user account (admin only).
+    """
+    try:
+        # Check permissions (only admins can delete)
+        if request.user.user_type != 'admin':
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators can delete users.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        user = User.objects.get(pk=user_id)
+        
+        # Prevent deleting yourself
+        if user.id == request.user.id:
+            return Response({
+                'error': 'Cannot delete your own account'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        email = user.email
+        user.delete()
+        
+        logger.info(f"User {email} deleted by {request.user.email}")
+        
+        return Response({
+            'message': 'User deleted successfully'
+        }, status=status.HTTP_200_OK)
+    
+    except User.DoesNotExist:
+        return Response({
+            'error': 'User not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    except Exception as e:
+        logger.error(f"Error in delete_user: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

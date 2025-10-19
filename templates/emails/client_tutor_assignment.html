@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Tutor Has Been Assigned</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: #ffffff;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .content {
+            padding: 30px 20px;
+        }
+        .greeting {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 20px;
+        }
+        .info-card {
+            background-color: #f8fafc;
+            border-left: 4px solid #10b981;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        .info-card h3 {
+            margin: 0 0 10px 0;
+            color: #10b981;
+            font-size: 16px;
+        }
+        .info-row {
+            display: flex;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        .info-row:last-child {
+            border-bottom: none;
+        }
+        .info-label {
+            font-weight: 600;
+            color: #64748b;
+            min-width: 140px;
+        }
+        .info-value {
+            color: #1e293b;
+            flex: 1;
+        }
+        .highlight-box {
+            background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+            border: 2px solid #10b981;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .highlight-box h2 {
+            color: #065f46;
+            margin: 0 0 15px 0;
+            font-size: 20px;
+        }
+        .tutor-info {
+            background-color: #ffffff;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+        }
+        .footer {
+            background-color: #f8fafc;
+            padding: 20px;
+            text-align: center;
+            color: #64748b;
+            font-size: 14px;
+        }
+        .footer a {
+            color: #10b981;
+            text-decoration: none;
+        }
+        .highlight {
+            color: #10b981;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎉 Your Tutor Has Been Assigned!</h1>
+        </div>
+        
+        <div class="content">
+            <p class="greeting">Dear {{ client_name }},</p>
+            
+            <p>Great news! We've assigned a qualified tutor for your <strong>{{ subject_name }}</strong> tutoring sessions.</p>
+            
+            <div class="highlight-box">
+                <h2>👨‍🏫 Your Assigned Tutor</h2>
+                <div class="tutor-info">
+                    <div class="info-row">
+                        <span class="info-label">Name:</span>
+                        <span class="info-value highlight">{{ tutor_name }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Tutor ID:</span>
+                        <span class="info-value">{{ tutor_id }}</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Email:</span>
+                        <span class="info-value">{{ tutor_email }}</span>
+                    </div>
+                    {% if tutor_phone %}
+                    <div class="info-row">
+                        <span class="info-label">Phone:</span>
+                        <span class="info-value">{{ tutor_phone }}</span>
+                    </div>
+                    {% endif %}
+                    {% if tutor_qualification %}
+                    <div class="info-row">
+                        <span class="info-label">Qualification:</span>
+                        <span class="info-value">{{ tutor_qualification }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h3>📚 Tutoring Details</h3>
+                <div class="info-row">
+                    <span class="info-label">Gig ID:</span>
+                    <span class="info-value">{{ gig_id }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Subject:</span>
+                    <span class="info-value">{{ subject_name }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Level:</span>
+                    <span class="info-value">{{ level }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Total Hours:</span>
+                    <span class="info-value">{{ total_hours }} hours</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Schedule:</span>
+                    <span class="info-value">{{ start_date }} to {{ end_date }}</span>
+                </div>
+                {% if total_fee %}
+                <div class="info-row">
+                    <span class="info-label">Total Fee:</span>
+                    <span class="info-value highlight">{{ total_fee }}</span>
+                </div>
+                {% endif %}
+            </div>
+
+            <div style="background-color: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                <p style="margin: 0; color: #92400e;">
+                    <strong>📱 Important:</strong> Your tutor has also received your contact details and will be in touch with you shortly to schedule the first session.
+                </p>
+            </div>
+
+            <p><strong>What Happens Next:</strong></p>
+            <ol style="color: #475569;">
+                <li>Your tutor, {{ tutor_name }}, will contact you within 24-48 hours</li>
+                <li>You'll discuss and agree on session times that work for both of you</li>
+                <li>Tutoring sessions will begin as per your schedule</li>
+                <li>You can track progress through your Quest4Knowledge account</li>
+            </ol>
+
+            {% if description %}
+            <div class="info-card">
+                <h3>📝 Special Requirements</h3>
+                <p style="margin: 10px 0 0 0; color: #475569;">{{ description }}</p>
+            </div>
+            {% endif %}
+
+            <p style="margin-top: 30px; color: #64748b; font-size: 14px;">
+                If you have any questions or concerns, please don't hesitate to contact us at 
+                <a href="mailto:{{ support_email }}" style="color: #10b981;">{{ support_email }}</a>
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p style="margin: 0 0 10px 0;">
+                <strong>Quest4Knowledge</strong> - Excellence in Education
+            </p>
+            <p style="margin: 0;">
+                <a href="https://quest4knowledge.co.za">Visit Website</a> • 
+                <a href="tel:{{ support_phone }}">{{ support_phone }}</a> • 
+                <a href="mailto:{{ support_email }}">Contact Support</a>
+            </p>
+            <p style="margin: 10px 0 0 0; font-size: 12px; color: #94a3b8;">
+                © 2025 Quest4Knowledge. All rights reserved.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
+

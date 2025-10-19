@@ -10,6 +10,14 @@ urlpatterns = [
     path('logout/', views.logout_view, name='logout'),
     path('token/refresh/', views.token_refresh_view, name='token_refresh'),
     
+    # User management endpoints (admin only)
+    path('', views.users_list, name='users_list'),
+    path('create-tutor/', views.create_tutor_user, name='create_tutor_user'),
+    path('<int:user_id>/', views.update_user, name='update_user'),
+    path('<int:user_id>/deactivate/', views.deactivate_user, name='deactivate_user'),
+    path('<int:user_id>/activate/', views.activate_user, name='activate_user'),
+    path('<int:user_id>/delete/', views.delete_user, name='delete_user'),
+    
     # User profile endpoints
     path('profile/', views.user_profile_view, name='user_profile'),
     path('profile/update/', views.update_user_profile, name='update_user_profile'),

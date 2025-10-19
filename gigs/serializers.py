@@ -118,13 +118,27 @@ class GigSessionDetailSerializer(GigSessionSerializer):
         fields = GigSessionSerializer.Meta.fields + ['gig_info']
     
     def get_gig_info(self, obj):
-        """Get basic gig information."""
-        return {
+        """Get basic gig information including tutor details."""
+        gig_info = {
             'gig_id': obj.gig.gig_id,
             'title': obj.gig.title,
             'status': obj.gig.status,
             'client_name': obj.gig.client_name,
         }
+        
+        # Add tutor information if available
+        if obj.gig.tutor:
+            gig_info['tutor'] = {
+                'id': obj.gig.tutor.id,
+                'tutor_id': obj.gig.tutor.tutor_id,
+                'full_name': obj.gig.tutor.full_name,
+                'email_address': obj.gig.tutor.email_address,
+                'phone_number': obj.gig.tutor.phone_number,
+            }
+        else:
+            gig_info['tutor'] = None
+            
+        return gig_info
 
 
 class GigSerializer(serializers.ModelSerializer):
@@ -371,6 +385,7 @@ class GigListSerializer(GigSerializer):
     Simplified serializer for listing gigs.
     """
     sessions_count = serializers.SerializerMethodField()
+    tutor_details = serializers.SerializerMethodField()
     
     class Meta:
         model = Gig
@@ -379,6 +394,7 @@ class GigListSerializer(GigSerializer):
             'gig_id',
             'tutor',
             'tutor_name',
+            'tutor_details',
             'title',
             'subject_name',
             'level',
@@ -395,6 +411,18 @@ class GigListSerializer(GigSerializer):
             'sessions_count',
             'created_at',
         ]
+    
+    def get_tutor_details(self, obj):
+        """Get full tutor details for online session creation."""
+        if obj.tutor:
+            return {
+                'id': obj.tutor.id,
+                'tutor_id': obj.tutor.tutor_id,
+                'full_name': obj.tutor.full_name,
+                'email_address': obj.tutor.email_address,
+                'phone_number': obj.tutor.phone_number,
+            }
+        return None
     
     def get_sessions_count(self, obj):
         """Get session count."""
@@ -416,15 +444,210 @@ class SessionVerificationSerializer(serializers.Serializer):
         if not session:
             raise serializers.ValidationError("Session not found in context.")
         
-        # Check if gig is active
-        if session.gig.status != 'active':
-            raise serializers.ValidationError("Can only verify sessions for active gigs.")
+        # Note: We allow verification of sessions even for completed/paused gigs
+        # because admins may verify sessions at the end of the month after the gig period
         
         # If verifying, check if enough hours remain
-        if verified and session.hours_logged > session.gig.total_hours_remaining:
+        if verified and not session.is_verified and session.hours_logged > session.gig.total_hours_remaining:
             raise serializers.ValidationError(
                 f"Cannot verify session. Hours logged ({session.hours_logged}) "
                 f"exceed remaining hours ({session.gig.total_hours_remaining})."
             )
         
         return attrs
+
+class OnlineSessionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for OnlineSession model.
+    """
+    session_id = serializers.CharField(read_only=True)
+    digital_samba_url = serializers.CharField(read_only=True)
+    meeting_url = serializers.CharField(read_only=True)
+    tutor_meeting_url = serializers.CharField(read_only=True)
+    client_meeting_url = serializers.CharField(read_only=True)
+    duration_minutes = serializers.IntegerField(read_only=True)
+    is_ongoing = serializers.BooleanField(read_only=True)
+    time_remaining_minutes = serializers.IntegerField(read_only=True)
+    
+    # Related fields
+    gig_info = serializers.SerializerMethodField()
+    tutor_info = serializers.SerializerMethodField()
+    created_by_name = serializers.SerializerMethodField()
+    
+    class Meta:
+        from .models import OnlineSession
+        model = OnlineSession
+        fields = [
+            'id', 'session_id', 'gig', 'tutor', 'meeting_code', 'pin_code',
+            'room_name', 'digital_samba_room_id', 'digital_samba_room_url',
+            'scheduled_start', 'scheduled_end', 'actual_start', 
+            'actual_end', 'extended_end', 'status', 'session_notes',
+            'tutor_joined', 'client_joined', 'tutor_joined_at', 'client_joined_at',
+            'created_by', 'created_at', 'updated_at',
+            'digital_samba_url', 'meeting_url', 'tutor_meeting_url', 'client_meeting_url',
+            'duration_minutes', 'is_ongoing', 'time_remaining_minutes', 
+            'gig_info', 'tutor_info', 'created_by_name'
+        ]
+        read_only_fields = [
+            'id', 'meeting_code', 'pin_code', 'room_name', 'actual_start',
+            'actual_end', 'tutor_joined', 'client_joined', 'tutor_joined_at',
+            'client_joined_at', 'created_at', 'updated_at'
+        ]
+    
+    def get_gig_info(self, obj):
+        """Get basic gig information."""
+        return {
+            'gig_id': obj.gig.gig_id,
+            'title': obj.gig.title,
+            'subject_name': obj.gig.subject_name,
+            'client_name': obj.gig.client_name,
+            'client_email': obj.gig.client_email,
+            'client_phone': obj.gig.client_phone,
+        }
+    
+    def get_tutor_info(self, obj):
+        """Get basic tutor information."""
+        return {
+            'tutor_id': obj.tutor.tutor_id,
+            'full_name': obj.tutor.full_name,
+            'email_address': obj.tutor.email_address,
+            'phone_number': obj.tutor.phone_number,
+        }
+    
+    def get_created_by_name(self, obj):
+        """Get name of admin who created the session."""
+        return obj.created_by.get_full_name() if obj.created_by else None
+
+
+class OnlineSessionCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating online sessions.
+    Tutor is automatically set from the selected gig.
+    """
+    tutor = serializers.PrimaryKeyRelatedField(read_only=True)
+    
+    class Meta:
+        from .models import OnlineSession
+        model = OnlineSession
+        fields = [
+            'gig', 'tutor', 'scheduled_start', 'scheduled_end', 'session_notes'
+        ]
+    
+    def validate(self, attrs):
+        """Validate online session creation."""
+        scheduled_start = attrs.get('scheduled_start')
+        scheduled_end = attrs.get('scheduled_end')
+        gig = attrs.get('gig')
+        
+        # Validate start is before end
+        if scheduled_start >= scheduled_end:
+            raise serializers.ValidationError({
+                'scheduled_end': 'End time must be after start time.'
+            })
+        
+        # Ensure gig has an assigned tutor
+        if gig and not gig.tutor:
+            raise serializers.ValidationError({
+                'gig': 'Selected gig must have an assigned tutor.'
+            })
+        
+        # Auto-assign tutor from gig
+        if gig and gig.tutor:
+            attrs['tutor'] = gig.tutor
+        
+        # Check for tutor conflicts
+        from django.utils import timezone
+        from .models import OnlineSession
+        
+        tutor = attrs.get('tutor')
+        if tutor:
+            conflicting_sessions = OnlineSession.objects.filter(
+                tutor=tutor,
+                status__in=['scheduled', 'active'],
+                scheduled_start__lt=scheduled_end,
+                scheduled_end__gt=scheduled_start
+            )
+            
+            if conflicting_sessions.exists():
+                raise serializers.ValidationError({
+                    'scheduled_start': f'Tutor {tutor.full_name} already has a session scheduled during this time.'
+                })
+        
+        return attrs
+
+
+class OnlineSessionUpdateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for updating online sessions.
+    """
+    class Meta:
+        from .models import OnlineSession
+        model = OnlineSession
+        fields = ['scheduled_start', 'scheduled_end', 'session_notes', 'status']
+    
+    def validate(self, attrs):
+        """Validate online session update."""
+        scheduled_start = attrs.get('scheduled_start', self.instance.scheduled_start)
+        scheduled_end = attrs.get('scheduled_end', self.instance.scheduled_end)
+        
+        # Validate start is before end
+        if scheduled_start >= scheduled_end:
+            raise serializers.ValidationError({
+                'scheduled_end': 'End time must be after start time.'
+            })
+        
+        return attrs
+
+
+class OnlineSessionJoinSerializer(serializers.Serializer):
+    """
+    Serializer for joining an online session.
+    """
+    meeting_code = serializers.CharField(max_length=15)
+    pin_code = serializers.CharField(max_length=6)
+    participant_type = serializers.ChoiceField(choices=['tutor', 'client'])
+    
+    def validate(self, attrs):
+        """Validate meeting code and PIN."""
+        from .models import OnlineSession
+        
+        meeting_code = attrs.get('meeting_code')
+        pin_code = attrs.get('pin_code')
+        
+        try:
+            session = OnlineSession.objects.get(meeting_code=meeting_code)
+        except OnlineSession.DoesNotExist:
+            raise serializers.ValidationError({
+                'meeting_code': 'Invalid meeting code.'
+            })
+        
+        if session.pin_code != pin_code:
+            raise serializers.ValidationError({
+                'pin_code': 'Invalid PIN code.'
+            })
+        
+        if session.status == 'cancelled':
+            raise serializers.ValidationError({
+                'meeting_code': 'This session has been cancelled.'
+            })
+        
+        if session.status == 'completed':
+            raise serializers.ValidationError({
+                'meeting_code': 'This session has already ended.'
+            })
+        
+        attrs['session'] = session
+        return attrs
+
+
+class OnlineSessionExtendSerializer(serializers.Serializer):
+    """
+    Serializer for extending an online session.
+    """
+    additional_minutes = serializers.IntegerField(min_value=5, max_value=120)
+    
+    def validate_additional_minutes(self, value):
+        """Validate extension duration."""
+        if value % 5 != 0:
+            raise serializers.ValidationError('Extension must be in 5-minute increments.')
+        return value

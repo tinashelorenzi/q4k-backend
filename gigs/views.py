@@ -1,6 +1,6 @@
 from rest_framework import status, filters
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 from django.shortcuts import get_object_or_404
@@ -28,6 +28,7 @@ from .serializers import (
     GigSessionDetailSerializer,
     SessionVerificationSerializer,
 )
+from .utils import send_session_verification_email
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -487,12 +488,9 @@ def assign_gig(request, gig_id):
         else:
             gig = get_object_or_404(Gig, pk=gig_id)
         
-        # Check if gig is already assigned
-        if gig.tutor:
-            return Response({
-                'error': 'Gig is already assigned',
-                'detail': f'Gig is currently assigned to {gig.tutor.full_name}'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # Check if gig is already assigned (for reassignment tracking)
+        is_reassignment = bool(gig.tutor)
+        old_tutor_name = gig.tutor.full_name if gig.tutor else None
         
         serializer = GigAssignmentSerializer(data=request.data)
         
@@ -501,20 +499,46 @@ def assign_gig(request, gig_id):
             notes = serializer.validated_data.get('notes', '')
             
             tutor = Tutor.objects.get(pk=tutor_id)
+            
+            # Update gig assignment
             gig.tutor = tutor
             
+            # Add assignment/reassignment note
+            timestamp = timezone.now().strftime("%Y-%m-%d %H:%M")
+            if is_reassignment:
+                gig.notes += f"\n[{timestamp}] Reassigned from {old_tutor_name} to {tutor.full_name}"
+            else:
+                gig.notes += f"\n[{timestamp}] Assigned to {tutor.full_name}"
+            
             if notes:
-                timestamp = timezone.now().strftime("%Y-%m-%d %H:%M")
-                gig.notes += f"\n[{timestamp}] Assigned to {tutor.full_name}: {notes}"
+                gig.notes += f": {notes}"
             
             gig.save()
             
-            logger.info(f"Gig {gig.gig_id} assigned to tutor {tutor.tutor_id} by {request.user.email}")
+            # Send email notifications
+            try:
+                if is_reassignment:
+                    from .utils import send_gig_reassignment_emails
+                    email_status = send_gig_reassignment_emails(gig, old_tutor_name)
+                else:
+                    from .utils import send_gig_assignment_emails
+                    email_status = send_gig_assignment_emails(gig)
+            except Exception as email_error:
+                logger.warning(f"Failed to send assignment emails: {email_error}")
+                email_status = {'success': False, 'error': str(email_error)}
             
-            return Response({
-                'message': f'Gig successfully assigned to {tutor.full_name}',
-                'gig': GigDetailSerializer(gig).data
-            })
+            logger.info(f"Gig {gig.gig_id} {'reassigned' if is_reassignment else 'assigned'} to tutor {tutor.tutor_id} by {request.user.email}")
+            
+            response_data = {
+                'message': f'Gig successfully {"reassigned" if is_reassignment else "assigned"} to {tutor.full_name}',
+                'gig': GigDetailSerializer(gig).data,
+                'emails_sent': email_status.get('success', False)
+            }
+            
+            if not email_status.get('success'):
+                response_data['email_warning'] = 'Assignment notification emails could not be sent'
+            
+            return Response(response_data)
         
         return Response({
             'error': 'Validation failed',
@@ -600,7 +624,6 @@ def unassign_gig(request, gig_id):
             'error': 'An unexpected error occurred.',
             'details': str(e) if settings.DEBUG else 'Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -1217,14 +1240,21 @@ def verify_session(request, gig_id, session_id):
                         session.session_notes += f"\n[{timestamp}] Verification notes: {notes}"
                         session.save()
                     
+                    # Send verification email to tutor
+                    email_result = send_session_verification_email(session, notes)
+                    
                     logger.info(f"Session {session.session_id} verified by {request.user.email}")
                     
-                    return Response({
+                    response_data = {
                         'message': 'Session verified successfully',
                         'session': GigSessionDetailSerializer(session).data,
                         'hours_subtracted': session.hours_logged,
-                        'gig_hours_remaining': session.gig.total_hours_remaining
-                    })
+                        'gig_hours_remaining': session.gig.total_hours_remaining,
+                        'email_sent': email_result.get('tutor_email_sent', False),
+                        'email_errors': email_result.get('errors', [])
+                    }
+                    
+                    return Response(response_data)
                 else:
                     return Response({
                         'error': 'Session is already verified'
@@ -1354,3 +1384,419 @@ def tutor_sessions_list(request, tutor_id):
             'error': 'An unexpected error occurred.',
             'details': str(e) if settings.DEBUG else 'Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def sessions_list(request):
+    """
+    List all sessions for admin approval.
+    """
+    try:
+        # Check permissions
+        if not request.user.user_type in ['admin', 'manager', 'staff']:
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators can view all sessions.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get all sessions with related data
+        sessions = GigSession.objects.select_related('gig', 'gig__tutor').all().order_by('-created_at')
+        
+        # Apply pagination
+        paginator = SessionPagination()
+        page = paginator.paginate_queryset(sessions, request)
+        
+        if page is not None:
+            serializer = GigSessionDetailSerializer(page, many=True)
+            return paginator.get_paginated_response(serializer.data)
+        
+        serializer = GigSessionDetailSerializer(sessions, many=True)
+        return Response(serializer.data)
+    
+    except Exception as e:
+        logger.error(f"Error in sessions_list: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def analytics_dashboard(request):
+    """
+    Get analytics data for admin dashboard.
+    Returns comprehensive statistics about gigs, revenue, and sessions.
+    Revenue is calculated based on verified sessions and hours completed.
+    """
+    try:
+        # Check permissions
+        if not request.user.user_type in ['admin', 'manager', 'staff']:
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators can view analytics.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get all gigs
+        all_gigs = Gig.objects.select_related('tutor').all()
+        
+        # Calculate revenue based on gig creation (when client pays)
+        total_revenue_client = 0
+        total_revenue_profit = 0
+        total_hours_completed = 0
+        
+        for gig in all_gigs:
+            # Revenue is calculated from total gig value (client has already paid)
+            total_revenue_client += float(gig.total_client_fee or 0)
+            total_revenue_profit += float(gig.profit_margin or 0)
+            total_hours_completed += float(gig.hours_completed or 0)
+        
+        # Calculate this month's revenue from gigs created this month
+        current_month = timezone.now().month
+        current_year = timezone.now().year
+        
+        this_month_revenue_client = 0
+        this_month_revenue_profit = 0
+        this_month_hours = 0
+        
+        # Get gigs created this month (when client paid)
+        this_month_gigs = all_gigs.filter(
+            created_at__month=current_month,
+            created_at__year=current_year
+        )
+        
+        for gig in this_month_gigs:
+            this_month_revenue_client += float(gig.total_client_fee or 0)
+            this_month_revenue_profit += float(gig.profit_margin or 0)
+            this_month_hours += float(gig.hours_completed or 0)
+        
+        # Gig status counts
+        status_counts = {
+            'pending': all_gigs.filter(status='pending').count(),
+            'active': all_gigs.filter(status='active').count(),
+            'on_hold': all_gigs.filter(status='on_hold').count(),
+            'completed': all_gigs.filter(status='completed').count(),
+            'cancelled': all_gigs.filter(status='cancelled').count(),
+        }
+        
+        # Session statistics
+        total_sessions = GigSession.objects.count()
+        verified_sessions = GigSession.objects.filter(is_verified=True).count()
+        pending_sessions = GigSession.objects.filter(is_verified=False).count()
+        
+        # Monthly revenue for last 6 months (based on gig creation)
+        monthly_revenue = []
+        from datetime import timedelta
+        
+        for i in range(5, -1, -1):
+            # Calculate the target month
+            target_date = timezone.now() - timedelta(days=30 * i)
+            month = target_date.month
+            year = target_date.year
+            month_name = target_date.strftime('%b')
+            
+            # Get gigs created in this month
+            month_gigs = all_gigs.filter(
+                created_at__month=month,
+                created_at__year=year
+            )
+            
+            month_revenue = 0
+            month_profit = 0
+            month_hours = 0
+            
+            for gig in month_gigs:
+                month_revenue += float(gig.total_client_fee or 0)
+                month_profit += float(gig.profit_margin or 0)
+                month_hours += float(gig.hours_completed or 0)
+            
+            monthly_revenue.append({
+                'month': month_name,
+                'year': year,
+                'revenue': round(month_revenue, 2),
+                'profit': round(month_profit, 2),
+                'hours': round(month_hours, 2),
+                'gigs': month_gigs.count(),
+            })
+        
+        return Response({
+            'revenue': {
+                'total_client_revenue': round(total_revenue_client, 2),
+                'total_profit': round(total_revenue_profit, 2),
+                'this_month_client_revenue': round(this_month_revenue_client, 2),
+                'this_month_profit': round(this_month_revenue_profit, 2),
+                'total_hours_billed': round(total_hours_completed, 2),
+                'this_month_hours': round(this_month_hours, 2),
+            },
+            'gigs': {
+                'total': all_gigs.count(),
+                'by_status': status_counts,
+            },
+            'sessions': {
+                'total': total_sessions,
+                'verified': verified_sessions,
+                'pending_verification': pending_sessions,
+            },
+            'trends': {
+                'monthly_revenue': monthly_revenue,
+            }
+        })
+    
+    except Exception as e:
+        logger.error(f"Error in analytics_dashboard: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# =============================================================================
+# Online Session Views
+# =============================================================================
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def online_sessions_list(request):
+    """
+    List all online sessions or create a new one.
+    GET: List sessions (admin only)
+    POST: Create new session (admin only)
+    """
+    from .models import OnlineSession
+    from .serializers import OnlineSessionSerializer, OnlineSessionCreateSerializer
+    
+    # Check if user is admin/staff
+    if not (request.user.is_admin or request.user.is_staff or request.user.is_manager):
+        return Response({
+            'error': 'Permission denied',
+            'detail': 'Only administrators can manage online sessions.'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    if request.method == 'GET':
+        # List all online sessions
+        sessions = OnlineSession.objects.select_related('gig', 'tutor', 'created_by').all()
+        
+        # Filter by status if provided
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            sessions = sessions.filter(status=status_filter)
+        
+        # Filter by date range
+        from_date = request.query_params.get('from_date')
+        to_date = request.query_params.get('to_date')
+        if from_date:
+            sessions = sessions.filter(scheduled_start__gte=from_date)
+        if to_date:
+            sessions = sessions.filter(scheduled_start__lte=to_date)
+        
+        serializer = OnlineSessionSerializer(sessions, many=True)
+        return Response({
+            'count': sessions.count(),
+            'results': serializer.data
+        })
+    
+    elif request.method == 'POST':
+        # Create new online session
+        serializer = OnlineSessionCreateSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            online_session = serializer.save(created_by=request.user)
+            
+            # Send invitation emails
+            from .utils import send_online_session_invitations
+            email_result = send_online_session_invitations(online_session)
+            
+            response_serializer = OnlineSessionSerializer(online_session)
+            return Response({
+                'message': 'Online session created successfully',
+                'session': response_serializer.data,
+                'emails_sent': email_result
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response({
+            'error': 'Validation failed',
+            'details': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def online_session_detail(request, session_id):
+    """
+    Get, update, or delete a specific online session.
+    """
+    from .models import OnlineSession
+    from .serializers import OnlineSessionSerializer, OnlineSessionUpdateSerializer
+    
+    # Check if user is admin/staff
+    if not (request.user.is_admin or request.user.is_staff or request.user.is_manager):
+        return Response({
+            'error': 'Permission denied'
+        }, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        online_session = OnlineSession.objects.select_related('gig', 'tutor', 'created_by').get(pk=session_id)
+    except OnlineSession.DoesNotExist:
+        return Response({
+            'error': 'Online session not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    if request.method == 'GET':
+        serializer = OnlineSessionSerializer(online_session)
+        return Response(serializer.data)
+    
+    elif request.method == 'PUT':
+        serializer = OnlineSessionUpdateSerializer(online_session, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            serializer.save()
+            response_serializer = OnlineSessionSerializer(online_session)
+            return Response({
+                'message': 'Online session updated successfully',
+                'session': response_serializer.data
+            })
+        
+        return Response({
+            'error': 'Validation failed',
+            'details': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        online_session.cancel_session()
+        return Response({
+            'message': 'Online session cancelled successfully'
+        })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def online_session_validate(request):
+    """
+    Validate meeting code and PIN (public endpoint).
+    Returns session details if valid.
+    """
+    from .models import OnlineSession
+    from .serializers import OnlineSessionJoinSerializer, OnlineSessionSerializer
+    
+    serializer = OnlineSessionJoinSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        online_session = serializer.validated_data['session']
+        participant_type = serializer.validated_data['participant_type']
+        
+        # Mark participant as joined
+        online_session.mark_joined(participant_type)
+        
+        response_serializer = OnlineSessionSerializer(online_session)
+        return Response({
+            'message': 'Access granted',
+            'session': response_serializer.data,
+            'participant_type': participant_type
+        })
+    
+    return Response({
+        'error': 'Validation failed',
+        'details': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def online_session_by_code(request, meeting_code):
+    """
+    Get session details by meeting code (public endpoint).
+    Returns basic info without sensitive data.
+    """
+    from .models import OnlineSession
+    
+    try:
+        online_session = OnlineSession.objects.select_related('gig', 'tutor').get(meeting_code=meeting_code)
+        
+        # Return basic public info
+        return Response({
+            'session_id': online_session.session_id,
+            'meeting_code': online_session.meeting_code,
+            'scheduled_start': online_session.scheduled_start,
+            'scheduled_end': online_session.scheduled_end,
+            'extended_end': online_session.extended_end,
+            'status': online_session.status,
+            'duration_minutes': online_session.duration_minutes,
+            'is_ongoing': online_session.is_ongoing,
+            'time_remaining_minutes': online_session.time_remaining_minutes,
+            'gig_info': {
+                'subject_name': online_session.gig.subject_name,
+                'title': online_session.gig.title,
+            },
+            'tutor_info': {
+                'full_name': online_session.tutor.full_name,
+            }
+        })
+    except OnlineSession.DoesNotExist:
+        return Response({
+            'error': 'Invalid meeting code'
+        }, status=status.HTTP_404_NOT_FOUND)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def online_session_extend(request, session_id):
+    """
+    Extend an online session (public endpoint - anyone in the meeting can extend).
+    """
+    from .models import OnlineSession
+    from .serializers import OnlineSessionExtendSerializer, OnlineSessionSerializer
+    
+    try:
+        online_session = OnlineSession.objects.get(pk=session_id)
+    except OnlineSession.DoesNotExist:
+        return Response({
+            'error': 'Session not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    if online_session.status != 'active':
+        return Response({
+            'error': 'Can only extend active sessions'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    serializer = OnlineSessionExtendSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        additional_minutes = serializer.validated_data['additional_minutes']
+        online_session.extend_session(additional_minutes)
+        
+        response_serializer = OnlineSessionSerializer(online_session)
+        return Response({
+            'message': f'Session extended by {additional_minutes} minutes',
+            'session': response_serializer.data
+        })
+    
+    return Response({
+        'error': 'Validation failed',
+        'details': serializer.errors
+    }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def online_session_complete(request, session_id):
+    """
+    Manually complete an online session (public endpoint).
+    """
+    from .models import OnlineSession
+    from .serializers import OnlineSessionSerializer
+    
+    try:
+        online_session = OnlineSession.objects.get(pk=session_id)
+    except OnlineSession.DoesNotExist:
+        return Response({
+            'error': 'Session not found'
+        }, status=status.HTTP_404_NOT_FOUND)
+    
+    online_session.complete_session()
+    
+    serializer = OnlineSessionSerializer(online_session)
+    return Response({
+        'message': 'Session completed successfully',
+        'session': serializer.data
+    })
