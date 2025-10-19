@@ -301,7 +301,11 @@ EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
 EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower() == 'true'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+
+# Email "From" configuration with professional name
+EMAIL_FROM_NAME = os.getenv('EMAIL_FROM_NAME', 'Quest4Knowledge')
+DEFAULT_FROM_EMAIL = f"{EMAIL_FROM_NAME} <{os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)}>"
+SERVER_EMAIL = DEFAULT_FROM_EMAIL  # For error emails
 # SSL Configuration
 EMAIL_SSL_CERTFILE = os.getenv('EMAIL_SSL_CERTFILE', None)
 EMAIL_SSL_KEYFILE = os.getenv('EMAIL_SSL_KEYFILE', None)
