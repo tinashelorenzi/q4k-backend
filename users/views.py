@@ -1089,3 +1089,225 @@ def delete_user(request, user_id):
             'error': 'An unexpected error occurred.',
             'details': str(e) if settings.DEBUG else 'Please try again later.'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ============================================================================
+# PASSWORD RESET ENDPOINTS
+# ============================================================================
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def request_password_reset(request):
+    """
+    Request a password reset link.
+    Rate limited to 3 requests per day per user.
+    """
+    from .models import PasswordResetToken
+    
+    try:
+        email = request.data.get('email', '').strip().lower()
+        
+        if not email:
+            return Response({
+                'error': 'Email is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if user exists
+        try:
+            user = User.objects.get(email=email, is_active=True)
+        except User.DoesNotExist:
+            # For security, don't reveal if email exists
+            # Always return success to prevent email enumeration
+            return Response({
+                'message': 'If an account with that email exists, a password reset link has been sent.'
+            }, status=status.HTTP_200_OK)
+        
+        # Check rate limiting
+        can_create, reason = PasswordResetToken.can_create_reset_request(user)
+        
+        if not can_create:
+            return Response({
+                'error': 'Rate limit exceeded',
+                'detail': reason
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        
+        # Get client IP
+        ip_address = get_client_ip(request)
+        
+        # Create reset token
+        reset_token = PasswordResetToken.create_reset_token(user, ip_address)
+        
+        # Send email with reset link
+        try:
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
+            reset_url = f"{frontend_url}/reset-password/{reset_token.token}"
+            support_email = getattr(settings, 'ADMIN_EMAIL', 'support@quest4knowledge.co.za')
+            
+            context = {
+                'user': user,
+                'reset_url': reset_url,
+                'token': reset_token.token,
+                'expires_at': reset_token.expires_at,
+                'support_email': support_email,
+            }
+            
+            html_content = render_to_string('emails/password_reset.html', context)
+            text_content = strip_tags(html_content)
+            
+            email_message = EmailMultiAlternatives(
+                subject='Password Reset Request - Quest4Knowledge',
+                body=text_content,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email]
+            )
+            email_message.attach_alternative(html_content, "text/html")
+            email_message.send()
+            
+            logger.info(f"Password reset email sent to {user.email}")
+            
+        except Exception as e:
+            logger.error(f"Failed to send password reset email to {user.email}: {e}")
+            # Don't fail the request if email fails
+        
+        return Response({
+            'message': 'If an account with that email exists, a password reset link has been sent.'
+        }, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        logger.error(f"Error in request_password_reset: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_reset_token(request):
+    """
+    Verify if a password reset token is valid.
+    """
+    from .models import PasswordResetToken
+    
+    try:
+        token = request.data.get('token', '').strip()
+        
+        if not token:
+            return Response({
+                'error': 'Token is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            reset_token = PasswordResetToken.objects.get(token=token)
+        except PasswordResetToken.DoesNotExist:
+            return Response({
+                'error': 'Invalid token',
+                'detail': 'This password reset link is invalid.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Check if token is valid
+        if not reset_token.is_valid():
+            if reset_token.is_used:
+                return Response({
+                    'error': 'Token already used',
+                    'detail': 'This password reset link has already been used.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    'error': 'Token expired',
+                    'detail': 'This password reset link has expired. Please request a new one.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        return Response({
+            'valid': True,
+            'email': reset_token.user.email,
+            'expires_at': reset_token.expires_at
+        }, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        logger.error(f"Error in verify_reset_token: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request):
+    """
+    Reset password using a valid token.
+    """
+    from .models import PasswordResetToken
+    
+    try:
+        token = request.data.get('token', '').strip()
+        new_password = request.data.get('new_password', '')
+        confirm_password = request.data.get('confirm_password', '')
+        
+        # Validation
+        if not token:
+            return Response({
+                'error': 'Token is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not new_password:
+            return Response({
+                'error': 'New password is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if new_password != confirm_password:
+            return Response({
+                'error': 'Passwords do not match'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get and validate token
+        try:
+            reset_token = PasswordResetToken.objects.get(token=token)
+        except PasswordResetToken.DoesNotExist:
+            return Response({
+                'error': 'Invalid token',
+                'detail': 'This password reset link is invalid.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        if not reset_token.is_valid():
+            if reset_token.is_used:
+                return Response({
+                    'error': 'Token already used',
+                    'detail': 'This password reset link has already been used.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response({
+                    'error': 'Token expired',
+                    'detail': 'This password reset link has expired. Please request a new one.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Validate password strength
+        try:
+            validate_password(new_password, user=reset_token.user)
+        except DjangoValidationError as e:
+            return Response({
+                'error': 'Password validation failed',
+                'details': list(e.messages)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Update password
+        user = reset_token.user
+        user.set_password(new_password)
+        user.save()
+        
+        # Mark token as used
+        reset_token.mark_as_used()
+        
+        logger.info(f"Password reset successful for {user.email}")
+        
+        return Response({
+            'message': 'Password reset successful. You can now log in with your new password.'
+        }, status=status.HTTP_200_OK)
+    
+    except Exception as e:
+        logger.error(f"Error in reset_password: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -8,7 +8,7 @@ from django.shortcuts import redirect, get_object_or_404
 from django.contrib import messages
 from django.http import HttpResponseRedirect
 from django.urls import path
-from .models import Gig, GigSession, OnlineSession
+from .models import Gig, GigSession, OnlineSession, OnlineMeetingRequest
 
 
 def format_zar_currency(amount):
@@ -818,6 +818,136 @@ class OnlineSessionAdmin(admin.ModelAdmin):
             obj.meeting_url, obj.meeting_url
         )
     meeting_url_display.short_description = 'Meeting URL'
+
+
+@admin.register(OnlineMeetingRequest)
+class OnlineMeetingRequestAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for the OnlineMeetingRequest model.
+    """
+    
+    list_display = (
+        'request_id_display',
+        'tutor_link',
+        'gig_link',
+        'requested_start',
+        'duration_display',
+        'status_display',
+        'created_at_display',
+        'actions_display',
+    )
+    
+    list_filter = (
+        'status',
+        'requested_start',
+        'created_at',
+    )
+    
+    search_fields = (
+        'tutor__first_name',
+        'tutor__last_name',
+        'gig__title',
+        'gig__subject_name',
+        'request_notes',
+    )
+    
+    readonly_fields = (
+        'created_at',
+        'updated_at',
+        'reviewed_by',
+        'reviewed_at',
+        'created_session',
+    )
+    
+    fieldsets = (
+        ('Request Information', {
+            'fields': (
+                ('gig', 'tutor'),
+                'requested_start',
+                'requested_duration',
+                'request_notes',
+            )
+        }),
+        ('Status', {
+            'fields': (
+                'status',
+                'reviewed_by',
+                'reviewed_at',
+                'admin_notes',
+            )
+        }),
+        ('Created Session', {
+            'fields': (
+                'created_session',
+            ),
+            'classes': ('collapse',)
+        }),
+        ('Timestamps', {
+            'fields': (
+                'created_at',
+                'updated_at',
+            ),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def request_id_display(self, obj):
+        """Display request ID."""
+        return obj.request_id
+    request_id_display.short_description = 'Request ID'
+    
+    def tutor_link(self, obj):
+        """Display tutor with link."""
+        url = reverse('admin:tutors_tutor_change', args=[obj.tutor.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.tutor.full_name)
+    tutor_link.short_description = 'Tutor'
+    
+    def gig_link(self, obj):
+        """Display gig with link."""
+        url = reverse('admin:gigs_gig_change', args=[obj.gig.pk])
+        return format_html('<a href="{}">{}</a>', url, obj.gig.gig_id)
+    gig_link.short_description = 'Gig'
+    
+    def duration_display(self, obj):
+        """Display duration."""
+        return f"{obj.requested_duration} min"
+    duration_display.short_description = 'Duration'
+    
+    def status_display(self, obj):
+        """Display status with color."""
+        status_colors = {
+            'pending': 'orange',
+            'approved': 'green',
+            'rejected': 'red',
+            'cancelled': 'gray',
+        }
+        color = status_colors.get(obj.status, 'black')
+        return format_html(
+            '<span style="color: {}; font-weight: bold;">{}</span>',
+            color, obj.get_status_display()
+        )
+    status_display.short_description = 'Status'
+    
+    def created_at_display(self, obj):
+        """Display creation date."""
+        return obj.created_at.strftime("%Y-%m-%d %H:%M")
+    created_at_display.short_description = 'Requested At'
+    
+    def actions_display(self, obj):
+        """Display action buttons."""
+        if obj.status == 'pending':
+            return format_html(
+                '<a class="button" href="#" style="background-color: #28a745; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px; margin-right: 5px;">Approve</a>'
+                '<a class="button" href="#" style="background-color: #dc3545; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px;">Reject</a>'
+            )
+        elif obj.status == 'approved' and obj.created_session:
+            session_url = reverse('admin:gigs_onlinesession_change', args=[obj.created_session.pk])
+            return format_html(
+                '<a href="{}" style="color: green;">View Session</a>',
+                session_url
+            )
+        return "—"
+    actions_display.short_description = 'Actions'
 
 
 # Customize admin site for gigs

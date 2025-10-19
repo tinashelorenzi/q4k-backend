@@ -10,7 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 import csv
 import io
-from .models import User, TutorProfile, UserSession, AccountSetupToken
+from .models import User, TutorProfile, UserSession, AccountSetupToken, PasswordResetToken
 from .utils import send_account_setup_email, send_batch_import_summary_email
 
 
@@ -1016,6 +1016,74 @@ class AccountSetupTokenAdmin(admin.ModelAdmin):
         
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+@admin.register(PasswordResetToken)
+class PasswordResetTokenAdmin(admin.ModelAdmin):
+    """
+    Admin configuration for PasswordResetToken model.
+    """
+    list_display = [
+        'id',
+        'user_email',
+        'created_at',
+        'expires_at',
+        'status_display',
+        'used_at',
+        'ip_address',
+    ]
+    list_filter = [
+        'is_used',
+        'created_at',
+        'expires_at',
+    ]
+    search_fields = [
+        'user__email',
+        'user__first_name',
+        'user__last_name',
+        'token',
+        'ip_address',
+    ]
+    readonly_fields = [
+        'token',
+        'user',
+        'created_at',
+        'expires_at',
+        'used_at',
+        'ip_address',
+        'reset_link',
+    ]
+    ordering = ['-created_at']
+    
+    def user_email(self, obj):
+        """Display user email."""
+        return obj.user.email
+    user_email.short_description = 'User Email'
+    user_email.admin_order_field = 'user__email'
+    
+    def status_display(self, obj):
+        """Display token status with color."""
+        if obj.is_used:
+            return format_html('<span style="color: gray;">✓ Used</span>')
+        elif obj.is_expired():
+            return format_html('<span style="color: red;">⏰ Expired</span>')
+        else:
+            return format_html('<span style="color: green;">✓ Active</span>')
+    status_display.short_description = 'Status'
+    
+    def reset_link(self, obj):
+        """Display reset link."""
+        if not obj.is_used and not obj.is_expired():
+            from django.conf import settings
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
+            reset_url = f"{frontend_url}/reset-password/{obj.token}"
+            return format_html('<a href="{}" target="_blank">{}</a>', reset_url, reset_url)
+        return "—"
+    reset_link.short_description = 'Reset Link'
+    
+    def has_add_permission(self, request):
+        """Prevent manual creation through admin."""
+        return False
+
 
 # Customize admin site for users
 admin.site.site_header = "Quest4Knowledge User Management (ZAR)"

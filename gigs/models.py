@@ -784,3 +784,158 @@ class OnlineSession(models.Model):
         if self.status not in ['completed', 'cancelled']:
             self.status = 'cancelled'
             self.save()
+
+
+class OnlineMeetingRequest(models.Model):
+    """
+    Model to track tutor requests for online meeting sessions.
+    Tutors can request to schedule online sessions, which admins can approve.
+    """
+    
+    STATUS_CHOICES = [
+        ('pending', 'Pending Approval'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+        ('cancelled', 'Cancelled'),
+    ]
+    
+    # Foreign Keys
+    gig = models.ForeignKey(
+        Gig,
+        on_delete=models.CASCADE,
+        related_name='meeting_requests',
+        help_text="The gig this meeting request is for"
+    )
+    
+    tutor = models.ForeignKey(
+        'tutors.Tutor',
+        on_delete=models.CASCADE,
+        related_name='meeting_requests',
+        help_text="The tutor making the request"
+    )
+    
+    # Request Details
+    requested_start = models.DateTimeField(
+        help_text="Requested start date and time for the session"
+    )
+    
+    requested_duration = models.IntegerField(
+        validators=[MinValueValidator(15), MaxValueValidator(300)],
+        default=60,
+        help_text="Requested duration in minutes (15-300)"
+    )
+    
+    request_notes = models.TextField(
+        blank=True,
+        help_text="Additional notes from the tutor about the session"
+    )
+    
+    # Status
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default='pending'
+    )
+    
+    # Admin Response
+    reviewed_by = models.ForeignKey(
+        'users.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='reviewed_meeting_requests',
+        help_text="Admin who reviewed this request"
+    )
+    
+    reviewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the request was reviewed"
+    )
+    
+    admin_notes = models.TextField(
+        blank=True,
+        help_text="Notes from admin about the decision"
+    )
+    
+    # Reference to created session (if approved)
+    created_session = models.OneToOneField(
+        OnlineSession,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='request',
+        help_text="The online session created from this request"
+    )
+    
+    # Timestamps
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Online Meeting Request'
+        verbose_name_plural = 'Online Meeting Requests'
+    
+    def __str__(self):
+        return f"Request #{self.pk} - {self.gig.gig_id} by {self.tutor.full_name}"
+    
+    @property
+    def request_id(self):
+        """Generate a formatted request ID."""
+        return f"REQ-{self.pk:04d}" if self.pk else "REQ-XXXX"
+    
+    @property
+    def requested_end(self):
+        """Calculate requested end time."""
+        return self.requested_start + timezone.timedelta(minutes=self.requested_duration)
+    
+    def approve(self, admin_user, admin_notes=''):
+        """Approve the request and create an online session."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if self.status != 'pending':
+            raise ValidationError('Only pending requests can be approved')
+        
+        # Create the online session
+        online_session = OnlineSession.objects.create(
+            gig=self.gig,
+            tutor=self.tutor,
+            scheduled_start=self.requested_start,
+            scheduled_end=self.requested_end,
+            session_notes=f"Created from request {self.request_id}\n{self.request_notes}",
+            created_by=admin_user
+        )
+        
+        # Update request status
+        self.status = 'approved'
+        self.reviewed_by = admin_user
+        self.reviewed_at = timezone.now()
+        self.admin_notes = admin_notes
+        self.created_session = online_session
+        self.save()
+        
+        # Send invitation emails to tutor and client
+        try:
+            from .utils import send_online_session_invitations
+            email_status = send_online_session_invitations(online_session)
+            if not email_status.get('tutor_email_sent'):
+                logger.warning(f"Failed to send tutor invitation for approved request {self.request_id}")
+            if not email_status.get('client_email_sent'):
+                logger.warning(f"Failed to send client invitation for approved request {self.request_id}")
+        except Exception as e:
+            logger.error(f"Error sending invitations for approved request {self.request_id}: {e}")
+        
+        return online_session
+    
+    def reject(self, admin_user, admin_notes=''):
+        """Reject the request."""
+        if self.status != 'pending':
+            raise ValidationError('Only pending requests can be rejected')
+        
+        self.status = 'rejected'
+        self.reviewed_by = admin_user
+        self.reviewed_at = timezone.now()
+        self.admin_notes = admin_notes
+        self.save()

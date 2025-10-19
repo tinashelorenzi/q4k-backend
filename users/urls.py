@@ -25,7 +25,11 @@ urlpatterns = [
     
     # Password management
     path('change-password/', views.change_password, name='change_password'),
-    path('password-reset/', views.password_reset_request, name='password_reset'),
+    
+    # Password reset endpoints
+    path('password-reset/request/', views.request_password_reset, name='request_password_reset'),
+    path('password-reset/verify/', views.verify_reset_token, name='verify_reset_token'),
+    path('password-reset/reset/', views.reset_password, name='reset_password'),
     
     # Account settings
     path('settings/', views.user_settings, name='user_settings'),

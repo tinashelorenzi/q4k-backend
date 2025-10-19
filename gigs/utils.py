@@ -405,3 +405,104 @@ def send_online_session_invitations(online_session):
         email_results['errors'].append(f"Failed to send email to client {online_session.gig.client_name}.")
     
     return email_results
+
+
+def send_meeting_request_notification(meeting_request):
+    """
+    Send email notifications when a tutor requests an online meeting.
+    Sends to both admin (for approval) and tutor (for confirmation).
+    
+    Args:
+        meeting_request: The OnlineMeetingRequest instance
+    
+    Returns:
+        dict: Email sending status
+    """
+    from django.conf import settings
+    
+    result = {
+        'admin_email_sent': False,
+        'tutor_email_sent': False,
+        'errors': []
+    }
+    
+    # Get admin email from settings
+    admin_email = getattr(settings, 'MEETING_REQUEST_EMAIL', getattr(settings, 'ADMIN_EMAIL', 'admin@quest4knowledge.co.za'))
+    support_email = getattr(settings, 'ADMIN_EMAIL', 'support@quest4knowledge.co.za')
+    frontend_url = getattr(settings, 'FRONTEND_URL', 'http://localhost:5174')
+    
+    # Prepare common context
+    context = {
+        'request': meeting_request,
+        'request_id': meeting_request.request_id,
+        'tutor': meeting_request.tutor,
+        'gig': meeting_request.gig,
+        'requested_start': meeting_request.requested_start,
+        'requested_end': meeting_request.requested_end,
+        'requested_duration': meeting_request.requested_duration,
+        'request_notes': meeting_request.request_notes,
+        'client_name': meeting_request.gig.client_name,
+        'client_email': meeting_request.gig.client_email,
+        'support_email': support_email,
+    }
+    
+    # Send email to admin
+    try:
+        admin_context = {
+            **context,
+            'admin_panel_url': f"{frontend_url}/admin/online-sessions",
+        }
+        
+        html_content = render_to_string('emails/meeting_request_notification.html', admin_context)
+        text_content = strip_tags(html_content)
+        
+        subject = f"New Online Meeting Request: {meeting_request.gig.title} - {meeting_request.tutor.full_name}"
+        
+        email = EmailMultiAlternatives(
+            subject=subject,
+            body=text_content,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[admin_email]
+        )
+        email.attach_alternative(html_content, "text/html")
+        email.send()
+        
+        result['admin_email_sent'] = True
+        logger.info(f"Meeting request notification sent to admin {admin_email} for request {meeting_request.request_id}")
+        
+    except Exception as e:
+        error_msg = f"Failed to send meeting request notification to admin {admin_email}: {str(e)}"
+        result['errors'].append(error_msg)
+        logger.error(error_msg)
+    
+    # Send confirmation email to tutor
+    try:
+        tutor_context = {
+            **context,
+            'dashboard_url': f"{frontend_url}/dashboard/online-meetings",
+        }
+        
+        html_content = render_to_string('emails/meeting_request_confirmation.html', tutor_context)
+        text_content = strip_tags(html_content)
+        
+        subject = f"Meeting Request Submitted: {meeting_request.gig.title}"
+        
+        email = EmailMultiAlternatives(
+            subject=subject,
+            body=text_content,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            to=[meeting_request.tutor.email_address]
+        )
+        email.attach_alternative(html_content, "text/html")
+        email.send()
+        
+        result['tutor_email_sent'] = True
+        logger.info(f"Meeting request confirmation sent to tutor {meeting_request.tutor.email_address} for request {meeting_request.request_id}")
+        
+    except Exception as e:
+        error_msg = f"Failed to send confirmation to tutor {meeting_request.tutor.email_address}: {str(e)}"
+        result['errors'].append(error_msg)
+        logger.error(error_msg)
+    
+    result['success'] = result['admin_email_sent'] and result['tutor_email_sent']
+    return result

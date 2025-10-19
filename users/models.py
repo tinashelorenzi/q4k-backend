@@ -516,3 +516,134 @@ class AccountSetupToken(models.Model):
     def is_valid(self):
         """Check if the token is valid (not used and not expired)."""
         return not self.is_used and not self.is_expired()
+
+
+class PasswordResetToken(models.Model):
+    """
+    Model to store password reset tokens.
+    Tokens expire in 1 hour.
+    Maximum 3 concurrent requests per user per day.
+    """
+    
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='password_reset_tokens',
+        help_text="User who requested the password reset"
+    )
+    
+    token = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text="Unique token for password reset"
+    )
+    
+    is_used = models.BooleanField(
+        default=False,
+        help_text="Whether the token has been used"
+    )
+    
+    used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When the token was used"
+    )
+    
+    ip_address = models.GenericIPAddressField(
+        null=True,
+        blank=True,
+        help_text="IP address of the requester"
+    )
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(
+        help_text="Token expiration time (1 hour from creation)"
+    )
+    
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Password Reset Token'
+        verbose_name_plural = 'Password Reset Tokens'
+        indexes = [
+            models.Index(fields=['token']),
+            models.Index(fields=['user', 'created_at']),
+        ]
+    
+    def __str__(self):
+        return f"Reset token for {self.user.email} - {'Used' if self.is_used else 'Active'}"
+    
+    def save(self, *args, **kwargs):
+        """Generate token and set expiry on creation."""
+        if not self.pk:
+            # Generate secure token
+            if not self.token:
+                self.token = secrets.token_urlsafe(32)
+            
+            # Set expiry to 1 hour from now
+            if not self.expires_at:
+                self.expires_at = timezone.now() + timedelta(hours=1)
+        
+        super().save(*args, **kwargs)
+    
+    def is_expired(self):
+        """Check if the token has expired."""
+        return timezone.now() > self.expires_at
+    
+    def is_valid(self):
+        """Check if the token is valid (not used and not expired)."""
+        return not self.is_used and not self.is_expired()
+    
+    def mark_as_used(self):
+        """Mark the token as used."""
+        self.is_used = True
+        self.used_at = timezone.now()
+        self.save()
+    
+    @classmethod
+    def can_create_reset_request(cls, user):
+        """
+        Check if a user can create a new password reset request.
+        Maximum 3 concurrent requests per day.
+        
+        Returns:
+            tuple: (can_create: bool, reason: str)
+        """
+        # Get requests from the last 24 hours
+        one_day_ago = timezone.now() - timedelta(days=1)
+        recent_requests = cls.objects.filter(
+            user=user,
+            created_at__gte=one_day_ago
+        ).count()
+        
+        if recent_requests >= 3:
+            return False, f"You have reached the maximum of 3 password reset requests per day. Please try again later."
+        
+        return True, ""
+    
+    @classmethod
+    def create_reset_token(cls, user, ip_address=None):
+        """
+        Create a password reset token for a user.
+        
+        Args:
+            user: User instance
+            ip_address: IP address of the requester
+            
+        Returns:
+            PasswordResetToken instance or None if rate limit exceeded
+            
+        Raises:
+            ValidationError: If rate limit is exceeded
+        """
+        can_create, reason = cls.can_create_reset_request(user)
+        
+        if not can_create:
+            raise ValidationError(reason)
+        
+        # Create the token
+        token = cls.objects.create(
+            user=user,
+            ip_address=ip_address
+        )
+        
+        return token

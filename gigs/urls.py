@@ -21,6 +21,10 @@ urlpatterns = [
     path('online-sessions/validate/', views.online_session_validate, name='online_session_validate'),
     path('online-sessions/code/<str:meeting_code>/', views.online_session_by_code, name='online_session_by_code'),
     
+    # Meeting Requests
+    path('meeting-requests/', views.meeting_requests_list, name='meeting_requests_list'),
+    path('meeting-requests/<int:request_id>/review/', views.meeting_request_review, name='meeting_request_review'),
+    
     # Gig filtering and assignment (specific routes before generic)
     path('unassigned/', views.unassigned_gigs, name='unassigned_gigs'),
     path('tutor/<str:tutor_id>/', views.tutor_gigs, name='tutor_gigs'),

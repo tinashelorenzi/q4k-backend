@@ -1560,22 +1560,26 @@ def analytics_dashboard(request):
 def online_sessions_list(request):
     """
     List all online sessions or create a new one.
-    GET: List sessions (admin only)
+    GET: List sessions (admin sees all, tutors see only their own)
     POST: Create new session (admin only)
     """
     from .models import OnlineSession
     from .serializers import OnlineSessionSerializer, OnlineSessionCreateSerializer
     
-    # Check if user is admin/staff
-    if not (request.user.is_admin or request.user.is_staff or request.user.is_manager):
-        return Response({
-            'error': 'Permission denied',
-            'detail': 'Only administrators can manage online sessions.'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
     if request.method == 'GET':
-        # List all online sessions
-        sessions = OnlineSession.objects.select_related('gig', 'tutor', 'created_by').all()
+        # Tutors can view their own sessions, admins can view all
+        if request.user.is_admin or request.user.is_staff or request.user.is_manager:
+            # Admins see all sessions
+            sessions = OnlineSession.objects.select_related('gig', 'tutor', 'created_by').all()
+        elif hasattr(request.user, 'tutor_profile'):
+            # Tutors see only their own sessions
+            tutor = request.user.tutor_profile.tutor
+            sessions = OnlineSession.objects.select_related('gig', 'tutor', 'created_by').filter(tutor=tutor)
+        else:
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators and tutors can view online sessions.'
+            }, status=status.HTTP_403_FORBIDDEN)
         
         # Filter by status if provided
         status_filter = request.query_params.get('status')
@@ -1597,6 +1601,13 @@ def online_sessions_list(request):
         })
     
     elif request.method == 'POST':
+        # Only admins can create sessions
+        if not (request.user.is_admin or request.user.is_staff or request.user.is_manager):
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators can create online sessions.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
         # Create new online session
         serializer = OnlineSessionCreateSerializer(data=request.data)
         
@@ -1800,3 +1811,157 @@ def online_session_complete(request, session_id):
         'message': 'Session completed successfully',
         'session': serializer.data
     })
+
+
+# ============================================================================
+# ONLINE MEETING REQUEST ENDPOINTS
+# ============================================================================
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def meeting_requests_list(request):
+    """
+    List all meeting requests or create a new one.
+    Tutors can only see their own requests.
+    Admins can see all requests.
+    """
+    from .models import OnlineMeetingRequest
+    from .serializers import OnlineMeetingRequestSerializer, OnlineMeetingRequestCreateSerializer
+    
+    try:
+        if request.method == 'GET':
+            # Filter based on user type
+            if request.user.is_admin or request.user.is_staff:
+                # Admins see all requests
+                queryset = OnlineMeetingRequest.objects.all()
+            elif hasattr(request.user, 'tutor_profile'):
+                # Tutors see only their requests
+                tutor = request.user.tutor_profile.tutor
+                queryset = OnlineMeetingRequest.objects.filter(tutor=tutor)
+            else:
+                return Response({
+                    'error': 'Permission denied',
+                    'detail': 'Only tutors and admins can access meeting requests.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Filter by status if provided
+            status_filter = request.query_params.get('status')
+            if status_filter:
+                queryset = queryset.filter(status=status_filter)
+            
+            serializer = OnlineMeetingRequestSerializer(queryset, many=True)
+            return Response(serializer.data)
+        
+        elif request.method == 'POST':
+            # Only tutors can create requests
+            if not hasattr(request.user, 'tutor_profile'):
+                return Response({
+                    'error': 'Permission denied',
+                    'detail': 'Only tutors can create meeting requests.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            serializer = OnlineMeetingRequestCreateSerializer(
+                data=request.data,
+                context={'request': request}
+            )
+            
+            if serializer.is_valid():
+                meeting_request = serializer.save()
+                
+                # Send email notification to admin
+                try:
+                    from .utils import send_meeting_request_notification
+                    send_meeting_request_notification(meeting_request)
+                except Exception as email_error:
+                    logger.warning(f"Failed to send meeting request notification: {email_error}")
+                
+                logger.info(f"Meeting request {meeting_request.request_id} created by tutor {meeting_request.tutor.tutor_id}")
+                
+                return Response({
+                    'message': 'Meeting request submitted successfully',
+                    'request': OnlineMeetingRequestSerializer(meeting_request).data
+                }, status=status.HTTP_201_CREATED)
+            
+            return Response({
+                'error': 'Validation failed',
+                'details': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+    
+    except Exception as e:
+        logger.error(f"Error in meeting_requests_list: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def meeting_request_review(request, request_id):
+    """
+    Approve or reject a meeting request (admin only).
+    """
+    from .models import OnlineMeetingRequest
+    from .serializers import (
+        OnlineMeetingRequestSerializer,
+        OnlineMeetingRequestReviewSerializer, 
+        OnlineSessionSerializer
+    )
+    
+    try:
+        # Only admins can review requests
+        if not (request.user.is_admin or request.user.is_staff):
+            return Response({
+                'error': 'Permission denied',
+                'detail': 'Only administrators can review meeting requests.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get the meeting request
+        try:
+            meeting_request = OnlineMeetingRequest.objects.get(pk=request_id)
+        except OnlineMeetingRequest.DoesNotExist:
+            return Response({
+                'error': 'Meeting request not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Validate action
+        serializer = OnlineMeetingRequestReviewSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            action = serializer.validated_data['action']
+            admin_notes = serializer.validated_data.get('admin_notes', '')
+            
+            if action == 'approve':
+                # Approve and create online session
+                online_session = meeting_request.approve(request.user, admin_notes)
+                
+                logger.info(f"Meeting request {meeting_request.request_id} approved by {request.user.email}")
+                
+                return Response({
+                    'message': 'Meeting request approved and session created',
+                    'request': OnlineMeetingRequestSerializer(meeting_request).data,
+                    'session': OnlineSessionSerializer(online_session).data
+                })
+            
+            elif action == 'reject':
+                # Reject the request
+                meeting_request.reject(request.user, admin_notes)
+                
+                logger.info(f"Meeting request {meeting_request.request_id} rejected by {request.user.email}")
+                
+                return Response({
+                    'message': 'Meeting request rejected',
+                    'request': OnlineMeetingRequestSerializer(meeting_request).data
+                })
+        
+        return Response({
+            'error': 'Validation failed',
+            'details': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    except Exception as e:
+        logger.error(f"Error in meeting_request_review: {str(e)}")
+        return Response({
+            'error': 'An unexpected error occurred.',
+            'details': str(e) if settings.DEBUG else 'Please try again later.'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

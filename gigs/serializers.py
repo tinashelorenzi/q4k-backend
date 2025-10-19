@@ -4,7 +4,7 @@ from django.utils import timezone
 from decimal import Decimal
 from datetime import datetime
 
-from .models import Gig, GigSession
+from .models import Gig, GigSession, OnlineSession, OnlineMeetingRequest
 from tutors.models import Tutor
 from tutors.serializers import TutorSerializer
 
@@ -403,7 +403,13 @@ class GigListSerializer(GigSerializer):
             'client_name',
             'total_hours',
             'total_hours_remaining',
+            'hours_completed',  # Added for progress calculation
             'completion_percentage',
+            'hourly_rate_tutor',  # Added for earnings calculation
+            'hourly_rate_client',  # Added for reference
+            'total_tutor_remuneration',  # Added for reference
+            'total_client_fee',  # Added for revenue calculation
+            'profit_margin',  # Added for profit calculation
             'start_date',
             'end_date',
             'is_overdue',
@@ -651,3 +657,118 @@ class OnlineSessionExtendSerializer(serializers.Serializer):
         if value % 5 != 0:
             raise serializers.ValidationError('Extension must be in 5-minute increments.')
         return value
+
+
+class OnlineMeetingRequestSerializer(serializers.ModelSerializer):
+    """
+    Serializer for viewing online meeting requests.
+    """
+    request_id = serializers.CharField(read_only=True)
+    tutor_name = serializers.CharField(source='tutor.full_name', read_only=True)
+    tutor_id = serializers.CharField(source='tutor.tutor_id', read_only=True)
+    gig_title = serializers.CharField(source='gig.title', read_only=True)
+    gig_id = serializers.CharField(source='gig.gig_id', read_only=True)
+    client_name = serializers.CharField(source='gig.client_name', read_only=True)
+    subject_name = serializers.CharField(source='gig.subject_name', read_only=True)
+    reviewed_by_name = serializers.SerializerMethodField()
+    requested_end = serializers.DateTimeField(read_only=True)
+    created_session_id = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = OnlineMeetingRequest
+        fields = [
+            'id',
+            'request_id',
+            'gig',
+            'gig_id',
+            'gig_title',
+            'subject_name',
+            'client_name',
+            'tutor',
+            'tutor_id',
+            'tutor_name',
+            'requested_start',
+            'requested_end',
+            'requested_duration',
+            'request_notes',
+            'status',
+            'reviewed_by',
+            'reviewed_by_name',
+            'reviewed_at',
+            'admin_notes',
+            'created_session',
+            'created_session_id',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'request_id', 'status', 'reviewed_by', 'reviewed_by_name',
+            'reviewed_at', 'created_session', 'created_session_id', 'created_at', 'updated_at'
+        ]
+    
+    def get_reviewed_by_name(self, obj):
+        """Get name of admin who reviewed."""
+        if obj.reviewed_by:
+            return obj.reviewed_by.get_full_name() or obj.reviewed_by.username
+        return None
+    
+    def get_created_session_id(self, obj):
+        """Get the session ID if created."""
+        if obj.created_session:
+            return obj.created_session.session_id
+        return None
+
+
+class OnlineMeetingRequestCreateSerializer(serializers.ModelSerializer):
+    """
+    Serializer for creating online meeting requests by tutors.
+    """
+    tutor = serializers.PrimaryKeyRelatedField(read_only=True)
+    
+    class Meta:
+        model = OnlineMeetingRequest
+        fields = [
+            'gig',
+            'tutor',
+            'requested_start',
+            'requested_duration',
+            'request_notes',
+        ]
+        read_only_fields = ['tutor']
+    
+    def validate_gig(self, value):
+        """Validate the gig."""
+        if value.status != 'active':
+            raise serializers.ValidationError('Can only request meetings for active gigs.')
+        return value
+    
+    def validate_requested_start(self, value):
+        """Validate requested start time."""
+        if value < timezone.now():
+            raise serializers.ValidationError('Requested start time cannot be in the past.')
+        return value
+    
+    def validate(self, attrs):
+        """Additional validation."""
+        # Ensure tutor is assigned to the gig
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'tutor_profile'):
+            tutor = request.user.tutor_profile.tutor
+            gig = attrs.get('gig')
+            
+            if gig and gig.tutor != tutor:
+                raise serializers.ValidationError({
+                    'gig': 'You can only request meetings for your own gigs.'
+                })
+            
+            attrs['tutor'] = tutor
+        
+        return attrs
+
+
+class OnlineMeetingRequestReviewSerializer(serializers.Serializer):
+    """
+    Serializer for approving/rejecting meeting requests.
+    """
+    action = serializers.ChoiceField(choices=['approve', 'reject'])
+    admin_notes = serializers.CharField(required=False, allow_blank=True)
